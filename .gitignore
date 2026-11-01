@@ -1,0 +1,16 @@
+# secrets
+.env
+
+# python
+venv/
+__pycache__/
+*.pyc
+*.db
+
+# node
+node_modules/
+dist/
+
+# uploads and OS files
+uploads/
+.DS_Store
