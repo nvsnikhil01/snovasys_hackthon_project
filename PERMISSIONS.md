@@ -27,7 +27,7 @@ Status: draft, 1 Nov 2026. I will update it as the code is written.
 7. Search only returns documents the user may read.
 8. The user's role is read from the database on each request, not trusted from the token.
 
-## Decisions still open
-- Can admins read file contents, or only see metadata (name, owner, size, date)? Current plan: metadata only, unless the owner grants access.
-- Can an editor share a document with others? Current plan: no, only the owner.
+## Decisions
+- Admins can see document metadata but not file contents, unless the owner grants them access.
+- Only the owner can share a document. Editors cannot.
 - When a document is deleted, its grants are deleted too.

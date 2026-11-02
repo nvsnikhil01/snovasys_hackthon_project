@@ -11,11 +11,10 @@ One entry per day, written at the end of the day. Only what really happened.
 - Wrote the documentation skeleton and the first draft of the permission model
 
 **Not done / problems**
-- No application code yet
-- Nothing deployed yet
+- Backend skeleton, frontend scaffold and Render deployment moved to Day 2
 
 **AI used today**
-- Claude: planning, stack choice, setup help. Antigravity: [what you actually used it for]. Details in PROMPTS.md.
+- Claude: planning, stack choice, setup help. Antigravity: used to read and understand the brief, no code generated. Details in PROMPTS.md.
 
 **Tomorrow**
 - FastAPI backend with a working /health route
