@@ -16,12 +16,12 @@ I use AI tools and record every use here, including where they were wrong.
 - What I changed or rejected: I chose my own stack (FastAPI + React) after planning with Claude
 - What I understood from it: the project needs per-document permissions checked on the server, and an audit log that records denied attempts too
 
-## Plan for 2 Nov 2026 (Day 2)
-- Set up the FastAPI backend and a working /health route
-- Build the database models
-- Build registration, login and password hashing
-- Add roles
-- Commit at least 3 times with real messages
+## 2 Nov 2026
+- Tool: Claude (chat)
+- Used it for: step-by-step setup of the FastAPI backend with a /health route, the React (Vite) scaffold, and the Render deployment settings (build command, start command, Python version, free plan)
+- What I did myself: ran every command, created and saved the files, read the error messages, and made each commit
+- What I kept: all the commands and the 6-line /health route; I can explain what each line does
+- What I changed or rejected: I did not use the paid Claude Code extension. [Add only if true: I installed it in VS Code but did not sign in.]
 
 ## Mistakes the AI made
 - 1 Nov: Claude gave me Command Prompt commands (rmdir /s /q) while I was in PowerShell, so they failed. I used the PowerShell equivalent.

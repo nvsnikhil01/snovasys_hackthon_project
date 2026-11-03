@@ -24,16 +24,22 @@ One entry per day, written at the end of the day. Only what really happened.
 
 ## Day 2: Mon 2 Nov
 **Done**
--
+- Created the FastAPI backend skeleton with a /health route and ran it locally
+- Created the React (Vite) frontend scaffold and ran the starter page
+- Committed each step separately
+- Created a Render web service for the backend (root directory backend, free plan, start command uvicorn app.main:app) [result: live / failed / still deploying]
 
 **Not done / problems**
--
+- main.py was not saved when I first ran uvicorn, so it said the app was not found. Saving fixed it.
+- A typo at the npm prompt ("y" typed with a stray dot) cancelled the Vite install, so I ran the command again.
+- I typed the uvicorn command into the Build Command box on Render by mistake, and fixed it before deploying.
+- Database, authentication and roles not started yet
 
 **AI used today**
--
+- Claude: step-by-step setup of the backend, frontend and Render settings. Details in PROMPTS.md.
 
 **Tomorrow**
--
+- Finish Render deploy, create the database tables, registration and login
 
 ---
 
