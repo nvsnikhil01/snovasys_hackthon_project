@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
@@ -22,3 +24,11 @@ class LoginRequest(BaseModel):
 class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"
+class DocumentOut(BaseModel):
+    id: int
+    owner_id: int
+    filename: str
+    size: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
