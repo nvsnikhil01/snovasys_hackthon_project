@@ -45,17 +45,40 @@ One entry per day, written at the end of the day. Only what really happened.
 
 ## Day 3: Tue 3 Nov
 **Done**
--
+- Database connection and four tables (users, documents, permissions, audit_log)
+- Password hashing with bcrypt, register endpoint, login endpoint with JWT, /auth/me
+- Roles (user, admin, auditor), an admin-only /admin/users route and a seed script for demo accounts
+- Central permission function (permissions.py) with automated tests [confirm: 9 passed]
+- Backend live on Render, with APP_ENV and SECRET_KEY set there
+- Second-opinion security review of my auth and permission code with Codex, and fixes (see PROMPTS.md and THREATS.md)
 
 **Not done / problems**
--
+- Named a file modules.py instead of models.py, which caused an import error until I renamed it
+- Ran the server from the wrong folder and without the virtual environment
+- Left alice as an admin after a role test, so the admin login failed until I reset her and ran the seed
+- Created vault.db by hand once instead of letting the app create it
+- Committed 10 files in one commit at the end of the day instead of small commits
+- No document upload yet
 
 **AI used today**
--
+- Claude: step-by-step code and explanations. Codex: read-only security reviewer. Details in PROMPTS.md.
 
 **Tomorrow**
--
+- Postgres on Render, then document upload, document routes and sharing
 
 ---
 
-(Copy the same block for Day 4 Wed 4 Nov, Day 5 Thu 5 Nov, Day 6 Fri 6 Nov, and Day 7 Sat 7 Nov.)
+## Day 4: Wed 4 Nov
+**Done**
+- Set APP_ENV and SECRET_KEY on Render [confirm]
+- Made the database URL work with the psycopg 3 driver [confirm]
+- Postgres on Render: [created / connected / not yet]
+
+**Not done / problems**
+- Port 8000 was already in use by an old server I never stopped. I found the process and stopped it.
+
+**AI used today**
+- Claude: step-by-step code and explanations.
+
+**Tomorrow**
+- Document upload and per-document routes calling can()
