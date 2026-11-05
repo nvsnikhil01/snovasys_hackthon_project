@@ -32,3 +32,15 @@ class DocumentOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+class ShareRequest(BaseModel):
+    user_email: str
+    level: str  # "read" or "edit"
+
+
+class ShareOut(BaseModel):
+    id: int
+    document_id: int
+    user_id: int
+    user_email: str
+    level: str
+    model_config = {"from_attributes": True}

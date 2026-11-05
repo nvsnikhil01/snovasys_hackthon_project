@@ -22,6 +22,7 @@ I use AI tools and record every use here, including where they were wrong.
 - What I did myself: ran every command, created and saved the files, read the error messages, and made each commit
 - What I kept: all the commands and the 6-line /health route; I can explain what each line does
 - What I changed or rejected: I did not use the paid Claude Code extension.
+
 ## 3 Nov 2026
 - Tool: Claude (chat)
 - Used it for: code and explanations for the database models, bcrypt password hashing, register, login with JWT, /auth/me, roles, the seed script and permissions.py with tests
@@ -44,13 +45,6 @@ I use AI tools and record every use here, including where they were wrong.
 - What I kept: the upload validation logic in `routes/documents.py` and `DocumentOut` schema in `schemas.py` (which omits `stored_path`).
 - What I changed or rejected: postponed attaching Render PostgreSQL until the core document routes are complete.
 
-## 4 Nov 2026 (security review)
-- Tool: Gemini (acting as security reviewer for `routes/documents.py`)
-- Asked it to: review the upload endpoint for dangerous file uploads, path traversal, memory/disk exhaustion, and path leakage.
-- What it found: (1) magic-byte checks only inspect the first few bytes, not full file contents, (2) authenticated users could upload repeated 5 MB files to fill local disk, (3) Render's free tier wipes local `uploads/` on redeploy.
-- What I tested: tested `ok.txt` (201), no token (401), `fake.pdf` with text inside (400), `virus.exe` (415), and a 6 MB `big.txt` (413), plus verified only one `.bin` file was written to `backend/uploads/`.
-- What I changed: nothing in code needed changing for the 5 tests; recorded the magic-byte limit, disk quota limit, and Render ephemeral disk in `THREATS.md`.
-
 ## 4 Nov 2026 (Codex Review - Round 3)
 - Tool: Codex (ChatGPT) in VS Code, used as a read-only reviewer
 - Asked it to: review `backend/app/routes/documents.py` and `DocumentOut` in `schemas.py` for dangerous uploads, path traversal, memory/disk exhaustion, and path leakage.
@@ -62,6 +56,23 @@ I use AI tools and record every use here, including where they were wrong.
   (Positive note: No path traversal risk because filenames use random UUIDs, and `DocumentOut` hides internal storage paths).
 - What I tested: Verified header-matching uploads and checked disk behavior.
 - What I changed / Recorded: Kept the endpoint logic intact for the hackathon prototype, but recorded all findings as known operational limitations and threats in `THREATS.md`.
+
+## 5 Nov 2026
+- Tool: Gemini
+- Used it for: implementing document routes (`GET /documents`, `GET /documents/{doc_id}`, `GET /documents/{doc_id}/download`, `DELETE /documents/{doc_id}`), sharing routes (`POST /documents/{id}/share`, `GET /documents/{id}/shares`, `DELETE /documents/{id}/share/{user_id}`), and writing automated pytest tests (`tests/test_sharing.py`).
+- What I did myself: typed and tested the routes, unblocked PowerShell script execution, installed `httpx`, and verified all 10 unit and integration tests passed in pytest.
+- What I kept: the central `can()` permission check on every route, path validation against directory traversal, and automated terminal tests instead of manual browser clicks.
+- What I changed or rejected: rejected manual Swagger testing once automated tests were written.
+
+## 5 Nov 2026 (review)
+- Tool: Codex (ChatGPT) in VS Code, used as a read-only reviewer
+- Asked it to: review the document and sharing routes for permission bypasses, IDOR, path traversal, and edge cases.
+- What it found:
+  1. Upload and delete can leave orphaned files if database commits or file unlinks fail (recorded in THREATS.md).
+  2. The download and delete routes trusted the database's `stored_path` without checking if it stayed inside the upload directory.
+  3. Inaccessible IDs return 403 while nonexistent IDs return 404, revealing that an ID exists (recorded in THREATS.md).
+- What I tested: tested download with path checks, tried accessing missing vs unauthorized IDs, and ran all 10 pytest tests (all passed).
+- What I changed: added `.resolve()` directory boundary validation so downloads and deletes can never escape `UPLOAD_DIR`.
 
 ## Mistakes the AI made
 - 1 Nov: Claude gave me Command Prompt commands (rmdir /s /q) while I was in PowerShell, so they failed. I used the PowerShell equivalent.

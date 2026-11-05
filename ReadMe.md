@@ -45,13 +45,13 @@ Checked items work and have been tested. Unchecked items are planned.
 
 - [x] Registration and login (hashed passwords, JWT)
 - [x] Roles: user, admin, auditor
-- [ ] File upload with type and size validation, stored privately
-- [ ] Per-document permissions: read, edit, share, revoke
-- [ ] Central permission check used by every route
+- [x] File upload with type and size validation, stored privately
+- [x] Per-document permissions: read, edit, share, revoke
+- [x] Central permission check used by every route
 - [ ] Audit log including denied attempts, tamper-evident
 - [ ] Permission-aware search
-- [ ] Admin view
-- [ ] Automated permission tests
+- [x] Admin view
+- [x] Automated permission and sharing tests
 - [ ] Live deployment
 
 ---
@@ -62,10 +62,13 @@ Working and tested:
 - Registration, login (bcrypt + JWT) and `/auth/me`
 - Roles (user, admin, auditor) with an admin-only `/admin/users` route
 - Seed script for demo accounts
-- Central permission function with automated tests
-- React + Vite starter page (local, no app pages yet)
+- Central permission function (`permissions.py`) with 9 unit tests
+- Document upload with signature/magic-byte checks and 5 MB size limit
+- Document listing, downloading (as attachment), and deletion calling `can()`
+- Document sharing and revocation endpoints with automated end-to-end tests (`test_sharing.py`, 10 tests passing)
+- React + Vite starter page (local, UI views to be built next)
 
-Not built yet: document upload, per-document routes, sharing, audit log, search, and the frontend pages.
+Not built yet: tamper-evident audit log, search, and the frontend pages.
 
 ---
 
@@ -87,6 +90,7 @@ Current layout. More files are added as features are built.
 ├── backend/
 │   ├── seed.py                # demo accounts
 │   ├── requirements.txt
+│   ├── uploads/               # private stored files (.bin)
 │   ├── app/
 │   │   ├── main.py
 │   │   ├── database.py
@@ -95,8 +99,8 @@ Current layout. More files are added as features are built.
 │   │   ├── security.py        # passwords, tokens
 │   │   ├── dependencies.py    # current user, role checks
 │   │   ├── permissions.py     # the single permission check
-│   │   └── routes/            # auth.py, admin.py
-│   └── tests/                 # test_permissions.py
+│   │   └── routes/            # auth.py, admin.py, documents.py
+│   └── tests/                 # test_permissions.py, test_sharing.py
 ├── frontend/
 │   └── src/
 ├── docs/
