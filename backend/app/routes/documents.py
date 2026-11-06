@@ -127,6 +127,23 @@ def list_documents(
     return [doc for doc in all_docs if can(db, current_user, doc, "read")]
 
 
+@router.get("/shared-with-me", response_model=list[DocumentOut])
+def list_shared_documents(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List documents explicitly shared with the current user."""
+    return db.scalars(
+        select(Document)
+        .join(Permission, Permission.document_id == Document.id)
+        .where(
+            Permission.user_id == current_user.id,
+            Document.owner_id != current_user.id,
+        )
+        .order_by(Document.id)
+    ).all()
+
+
 @router.get("/{doc_id}", response_model=DocumentOut)
 def get_document(
     doc_id: int,

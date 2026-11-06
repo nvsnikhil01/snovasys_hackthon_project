@@ -1,4 +1,9 @@
 const API_URL = import.meta.env.VITE_API_URL || "https://snovasys-hackthon-project.onrender.com";
+const API_BASE_URL = API_URL.replace(/\/+$/, "");
+
+function apiUrl(endpoint) {
+  return `${API_BASE_URL}/${endpoint.replace(/^\/+/, "")}`;
+}
 
 export function getToken() {
   return localStorage.getItem("token");
@@ -24,7 +29,7 @@ export async function apiRequest(endpoint, options = {}) {
     headers["Content-Type"] = "application/json";
   }
 
-  const res = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
+  const res = await fetch(apiUrl(endpoint), { ...options, headers });
   if (res.status === 204) return null;
 
   const data = await res.json().catch(() => null);
@@ -36,7 +41,7 @@ export async function apiRequest(endpoint, options = {}) {
 
 export async function downloadFile(docId, filename) {
   const token = getToken();
-  const res = await fetch(`${API_URL}/documents/${docId}/download`, {
+  const res = await fetch(apiUrl(`/documents/${docId}/download`), {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error("Download failed");

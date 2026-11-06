@@ -7,6 +7,9 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [documents, setDocuments] = useState([]);
+  const [sharedDocuments, setSharedDocuments] = useState([]);
+  const [sharedDocsLoaded, setSharedDocsLoaded] = useState(false);
+  const [activeTab, setActiveTab] = useState('my-docs');
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
   const [shareDocId, setShareDocId] = useState(null);
@@ -34,6 +37,16 @@ export default function App() {
     try {
       const docs = await apiRequest("/documents");
       setDocuments(docs);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function loadSharedDocs() {
+    try {
+      const docs = await apiRequest("/documents/shared-with-me");
+      setSharedDocuments(docs);
+      setSharedDocsLoaded(true);
     } catch (err) {
       setError(err.message);
     }
@@ -86,7 +99,17 @@ export default function App() {
     if (!confirm("Are you sure you want to delete this document?")) return;
     try {
       await apiRequest(`/documents/${docId}`, { method: "DELETE" });
-      setDocuments(documents.filter((d) => d.id !== docId));
+      setDocuments((current) => current.filter((doc) => doc.id !== docId));
+      setSharedDocuments((current) => current.filter((doc) => doc.id !== docId));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function handleDownload(doc) {
+    setError("");
+    try {
+      await downloadFile(doc.id, doc.filename);
     } catch (err) {
       setError(err.message);
     }
@@ -94,6 +117,7 @@ export default function App() {
 
   async function handleShare(e) {
     e.preventDefault();
+    setError("");
     try {
       await apiRequest(`/documents/${shareDocId}/share`, {
         method: "POST",
@@ -111,6 +135,9 @@ export default function App() {
     clearToken();
     setUser(null);
     setDocuments([]);
+    setSharedDocuments([]);
+    setSharedDocsLoaded(false);
+    setActiveTab('my-docs');
   }
 
   if (!user) {
@@ -180,9 +207,18 @@ export default function App() {
         </label>
       </div>
 
+      <div role="tablist" aria-label="Document lists" style={{ display: "flex", gap: 8, borderBottom: "1px solid #eee", marginBottom: 16 }}>
+        <button role="tab" aria-selected={activeTab === 'my-docs'} onClick={() => setActiveTab('my-docs')} style={{ padding: "8px 12px", border: 0, borderBottom: activeTab === 'my-docs' ? "2px solid #2563eb" : "2px solid transparent", background: "none", color: activeTab === 'my-docs' ? "#2563eb" : "#666", cursor: "pointer", fontWeight: activeTab === 'my-docs' ? "bold" : "normal" }}>
+          My Documents
+        </button>
+        <button role="tab" aria-selected={activeTab === 'shared-with-me'} onClick={() => { setActiveTab('shared-with-me'); if (!sharedDocsLoaded) loadSharedDocs(); }} style={{ padding: "8px 12px", border: 0, borderBottom: activeTab === 'shared-with-me' ? "2px solid #2563eb" : "2px solid transparent", background: "none", color: activeTab === 'shared-with-me' ? "#2563eb" : "#666", cursor: "pointer", fontWeight: activeTab === 'shared-with-me' ? "bold" : "normal" }}>
+          Shared with Me
+        </button>
+      </div>
+
       <div style={{ border: "1px solid #eee", borderRadius: 6, overflow: "hidden" }}>
-        {documents.length === 0 ? (
-          <div style={{ padding: 32, textAlign: "center", color: "#888" }}>No documents available. Upload one to get started.</div>
+        {(activeTab === 'my-docs' ? documents : sharedDocuments).length === 0 ? (
+          <div style={{ padding: 32, textAlign: "center", color: "#888" }}>{activeTab === 'my-docs' ? "No documents available. Upload one to get started." : "No documents have been shared with you."}</div>
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
             <thead style={{ background: "#f8fafc", borderBottom: "1px solid #eee" }}>
@@ -194,13 +230,13 @@ export default function App() {
               </tr>
             </thead>
             <tbody>
-              {documents.map((doc) => (
+              {(activeTab === 'my-docs' ? documents : sharedDocuments).map((doc) => (
                 <tr key={doc.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
                   <td style={{ padding: 12 }}>📄 {doc.filename}</td>
                   <td style={{ padding: 12 }}>{(doc.size / 1024).toFixed(1)} KB</td>
                   <td style={{ padding: 12 }}>{new Date(doc.created_at).toLocaleDateString()}</td>
                   <td style={{ padding: 12, textAlign: "right" }}>
-                    <button onClick={() => downloadFile(doc.id, doc.filename)} title="Download" style={{ marginRight: 8, border: "none", background: "none", cursor: "pointer", fontSize: 16 }}>
+                    <button onClick={() => handleDownload(doc)} title="Download" aria-label={`Download ${doc.filename}`} style={{ marginRight: 8, border: "none", background: "none", cursor: "pointer", fontSize: 16 }}>
                       📥
                     </button>
                     {doc.owner_id === user.id && (
@@ -211,6 +247,12 @@ export default function App() {
                         <button onClick={() => handleDelete(doc.id)} title="Delete" style={{ border: "none", background: "none", cursor: "pointer", fontSize: 16 }}>
                           🗑️
                         </button>
+                      </>
+                    )}
+                    {doc.owner_id !== user.id && (
+                      <>
+                        <button type="button" title="Only the owner can share this document" aria-label={`Share ${doc.filename}`} disabled style={{ marginRight: 8, border: "none", background: "none", cursor: "not-allowed", opacity: 0.4, fontSize: 16 }}>Share</button>
+                        <button type="button" title="Only the owner can delete this document" aria-label={`Delete ${doc.filename}`} disabled style={{ border: "none", background: "none", cursor: "not-allowed", opacity: 0.4, fontSize: 16 }}>Delete</button>
                       </>
                     )}
                   </td>
@@ -228,7 +270,7 @@ export default function App() {
             <form onSubmit={handleShare} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <input
                 type="email"
-                placeholder="User Email to share with"
+                placeholder="Target email"
                 required
                 value={shareEmail}
                 onChange={(e) => setShareEmail(e.target.value)}
