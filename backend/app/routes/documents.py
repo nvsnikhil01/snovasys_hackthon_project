@@ -35,12 +35,7 @@ def clean_filename(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]", "_", base)[:100] or "file"
 
 
-@router.post("", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)
-def upload(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
+def validate_and_read_file(file: UploadFile) -> tuple[str, bytes]:
     filename = clean_filename(file.filename)
     extension = Path(filename).suffix.lower()
     if extension not in SIGNATURES:
@@ -64,6 +59,17 @@ def upload(
         if b"\x00" in data:
             raise HTTPException(status_code=400, detail="File content does not match its type")
 
+    return filename, data
+
+
+@router.post("", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)
+def upload(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    filename, data = validate_and_read_file(file)
+
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     stored_name = uuid.uuid4().hex + ".bin"
     (UPLOAD_DIR / stored_name).write_bytes(data)
@@ -79,6 +85,36 @@ def upload(
     db.refresh(document)
 
     log_event(db, current_user.id, "upload", document.id, "allowed")
+    return document
+
+
+@router.put("/{doc_id}", response_model=DocumentOut)
+def update_document(
+    doc_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Allows owner or user with 'edit' permission to replace document content."""
+    document = authorize(db, current_user, db.get(Document, doc_id), "edit")
+    filename, data = validate_and_read_file(file)
+
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    upload_root = UPLOAD_DIR.resolve()
+
+    old_path = (UPLOAD_DIR / document.stored_path).resolve()
+    new_stored_name = uuid.uuid4().hex + ".bin"
+    (UPLOAD_DIR / new_stored_name).write_bytes(data)
+
+    document.filename = filename
+    document.stored_path = new_stored_name
+    document.size = len(data)
+    db.commit()
+    db.refresh(document)
+
+    if old_path.is_relative_to(upload_root) and old_path.is_file():
+        old_path.unlink()
+
     return document
 
 
@@ -111,7 +147,7 @@ def download_document(
 
     file_path = (UPLOAD_DIR / document.stored_path).resolve()
     upload_root = UPLOAD_DIR.resolve()
-    if not str(file_path).startswith(str(upload_root)) or not file_path.is_file():
+    if not file_path.is_relative_to(upload_root) or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Stored file is missing")
 
     return FileResponse(
@@ -132,7 +168,7 @@ def delete_document(
 
     file_path = (UPLOAD_DIR / document.stored_path).resolve()
     upload_root = UPLOAD_DIR.resolve()
-    if not str(file_path).startswith(str(upload_root)):
+    if not file_path.is_relative_to(upload_root):
         raise HTTPException(status_code=400, detail="Invalid stored path")
 
     db.execute(delete(Permission).where(Permission.document_id == document.id))
@@ -157,7 +193,8 @@ def share_document(
     if payload.level not in VALID_GRANT_LEVELS:
         raise HTTPException(status_code=400, detail="Invalid permission level. Use 'read' or 'edit'")
 
-    target_user = db.scalar(select(User).where(User.email == payload.user_email))
+    normalized_email = payload.user_email.strip().lower()
+    target_user = db.scalar(select(User).where(User.email == normalized_email))
     if not target_user:
         raise HTTPException(status_code=404, detail="Target user not found")
 

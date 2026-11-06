@@ -2,13 +2,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.audit import verify_chain
 from app.database import get_db
 from app.dependencies import require_role
-from app.models import User
-from app.schemas import UserOut
-
-from app.audit import verify_chain
-from app.models import AuditLog
+from app.models import AuditLog, Document, User
+from app.schemas import DocumentOut, UserOut
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -19,6 +17,17 @@ def list_users(
     admin: User = Depends(require_role("admin")),
 ):
     return db.scalars(select(User).order_by(User.id)).all()
+
+
+@router.get("/documents", response_model=list[DocumentOut])
+def list_all_documents_metadata(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_role("admin")),
+):
+    """Admins can view document metadata only, never file contents unless granted."""
+    return db.scalars(select(Document).order_by(Document.id)).all()
+
+
 @router.get("/audit")
 def audit_entries(
     limit: int = 100,

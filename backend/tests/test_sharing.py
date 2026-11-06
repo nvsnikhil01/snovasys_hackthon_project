@@ -12,7 +12,6 @@ from app.main import app
 
 @pytest.fixture
 def client():
-    # StaticPool ensures the in-memory database is shared across threads
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -48,54 +47,67 @@ def test_sharing_lifecycle(client):
     )
     assert res.status_code == 201
 
-    # Login Alice
-    res = client.post(
+    # Login Alice & Bob
+    alice_token = client.post(
         "/auth/login",
         json={"email": "alice@example.com", "password": "password123"},
-    )
-    assert res.status_code == 200
-    alice_token = res.json()["access_token"]
+    ).json()["access_token"]
     alice_headers = {"Authorization": f"Bearer {alice_token}"}
 
-    # Login Bob
-    res = client.post(
+    bob_token = client.post(
         "/auth/login",
         json={"email": "bob@example.com", "password": "password123"},
-    )
-    assert res.status_code == 200
-    bob_token = res.json()["access_token"]
+    ).json()["access_token"]
     bob_headers = {"Authorization": f"Bearer {bob_token}"}
 
     # 2. Alice uploads a document
-    file_content = b"Sample confidential text"
     res = client.post(
         "/documents",
-        files={"file": ("sample.txt", io.BytesIO(file_content), "text/plain")},
+        files={"file": ("sample.txt", io.BytesIO(b"Sample confidential text"), "text/plain")},
         headers=alice_headers,
     )
     assert res.status_code == 201
     doc_id = res.json()["id"]
 
-    # 3. Bob attempts to access before being shared -> 404 (existence hidden via authorize())
+    # 3. Bob attempts to access before being shared -> 404
     res = client.get(f"/documents/{doc_id}", headers=bob_headers)
     assert res.status_code == 404
 
-    # 4. Alice shares doc with Bob with 'read' grant
+    # 4. Alice shares doc with Bob with 'read' grant (testing case-insensitive email)
     res = client.post(
         f"/documents/{doc_id}/share",
-        json={"user_email": "bob@example.com", "level": "read"},
+        json={"user_email": "Bob@Example.com", "level": "read"},
         headers=alice_headers,
     )
     assert res.status_code == 200
     assert res.json()["level"] == "read"
 
-    # 5. Bob can now read the document
-    res = client.get(f"/documents/{doc_id}", headers=bob_headers)
-    assert res.status_code == 200
+    # 5. Bob can read, but cannot edit (PUT) or delete
+    assert client.get(f"/documents/{doc_id}", headers=bob_headers).status_code == 200
+    res_edit = client.put(
+        f"/documents/{doc_id}",
+        files={"file": ("updated.txt", io.BytesIO(b"Bob edit attempt"), "text/plain")},
+        headers=bob_headers,
+    )
+    assert res_edit.status_code == 404
+    assert client.delete(f"/documents/{doc_id}", headers=bob_headers).status_code == 404
 
-    # 6. Bob attempts to delete -> 404 (only owner can delete, unauthorized yields 404)
-    res = client.delete(f"/documents/{doc_id}", headers=bob_headers)
-    assert res.status_code == 404
+    # 6. Alice upgrades Bob to 'edit' grant -> Bob can now update the document
+    res = client.post(
+        f"/documents/{doc_id}/share",
+        json={"user_email": "bob@example.com", "level": "edit"},
+        headers=alice_headers,
+    )
+    assert res.status_code == 200
+    assert res.json()["level"] == "edit"
+
+    res_edit_ok = client.put(
+        f"/documents/{doc_id}",
+        files={"file": ("updated.txt", io.BytesIO(b"Bob valid edit"), "text/plain")},
+        headers=bob_headers,
+    )
+    assert res_edit_ok.status_code == 200
+    assert res_edit_ok.json()["filename"] == "updated.txt"
 
     # 7. Alice revokes Bob's access
     bob_user_id = client.get("/auth/me", headers=bob_headers).json()["id"]
@@ -107,3 +119,23 @@ def test_sharing_lifecycle(client):
     # 8. Bob attempts to read again -> 404
     res = client.get(f"/documents/{doc_id}", headers=bob_headers)
     assert res.status_code == 404
+
+
+def test_upload_rejects_spoofed_magic_bytes(client):
+    client.post(
+        "/auth/register",
+        json={"email": "alice@example.com", "password": "password123"},
+    )
+    token = client.post(
+        "/auth/login",
+        json={"email": "alice@example.com", "password": "password123"},
+    ).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Upload a file named .pdf that does not start with %PDF-
+    res = client.post(
+        "/documents",
+        files={"file": ("fake.pdf", io.BytesIO(b"not a real pdf"), "application/pdf")},
+        headers=headers,
+    )
+    assert res.status_code == 400
