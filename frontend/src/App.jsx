@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { apiRequest, downloadFile, getToken, setToken, clearToken } from "./api";
+import { apiRequest, apiUrl, downloadFile, getToken, setToken, clearToken } from "./api";
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -119,10 +119,18 @@ export default function App() {
     e.preventDefault();
     setError("");
     try {
-      await apiRequest(`/documents/${shareDocId}/share`, {
+      const response = await fetch(apiUrl(`/documents/${shareDocId}/share`), {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken()}`,
+        },
         body: JSON.stringify({ user_email: shareEmail, level: shareLevel }),
       });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(data?.detail || "Failed to share document");
+      }
       setShareDocId(null);
       setShareEmail("");
       alert("Document shared successfully!");
