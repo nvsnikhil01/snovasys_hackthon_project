@@ -8,11 +8,11 @@ from fastapi.responses import FileResponse
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.audit import log_event
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import Document, Permission, User
-from app.permissions import can
-from app.permissions import VALID_GRANT_LEVELS, can
+from app.permissions import VALID_GRANT_LEVELS, authorize, can
 from app.schemas import DocumentOut, ShareOut, ShareRequest
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -26,21 +26,13 @@ SIGNATURES = {
     ".png": b"\x89PNG\r\n\x1a\n",
     ".jpg": b"\xff\xd8\xff",
     ".jpeg": b"\xff\xd8\xff",
-    ".txt": None,  # plain text has no signature, so it is checked separately
+    ".txt": None,  # plain text has no signature, checked via utf-8 and null-bytes
 }
 
 
 def clean_filename(name: str) -> str:
-    # Keep only the last part (drops any folder path), then replace odd characters
     base = Path((name or "file").replace("\\", "/")).name
     return re.sub(r"[^A-Za-z0-9._-]", "_", base)[:100] or "file"
-
-
-def get_document_or_404(db: Session, doc_id: int) -> Document:
-    document = db.get(Document, doc_id)
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
-    return document
 
 
 @router.post("", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)
@@ -54,14 +46,12 @@ def upload(
     if extension not in SIGNATURES:
         raise HTTPException(status_code=415, detail="File type not allowed")
 
-    # Read one byte more than the limit, so we can tell if it is too big
     data = file.file.read(MAX_BYTES + 1)
     if len(data) > MAX_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 5 MB)")
     if len(data) == 0:
         raise HTTPException(status_code=400, detail="Empty file")
 
-    # Check the real content, not just the name
     signature = SIGNATURES[extension]
     if signature is not None:
         if not data.startswith(signature):
@@ -74,7 +64,6 @@ def upload(
         if b"\x00" in data:
             raise HTTPException(status_code=400, detail="File content does not match its type")
 
-    # The name on disk is random. The user's filename is never used as a path.
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     stored_name = uuid.uuid4().hex + ".bin"
     (UPLOAD_DIR / stored_name).write_bytes(data)
@@ -88,6 +77,8 @@ def upload(
     db.add(document)
     db.commit()
     db.refresh(document)
+
+    log_event(db, current_user.id, "upload", document.id, "allowed")
     return document
 
 
@@ -106,9 +97,7 @@ def get_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    document = get_document_or_404(db, doc_id)
-    if not can(db, current_user, document, "read"):
-        raise HTTPException(status_code=403, detail="Not allowed")
+    document = authorize(db, current_user, db.get(Document, doc_id), "read")
     return document
 
 
@@ -118,9 +107,7 @@ def download_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    document = get_document_or_404(db, doc_id)
-    if not can(db, current_user, document, "read"):
-        raise HTTPException(status_code=403, detail="Not allowed")
+    document = authorize(db, current_user, db.get(Document, doc_id), "read")
 
     file_path = (UPLOAD_DIR / document.stored_path).resolve()
     upload_root = UPLOAD_DIR.resolve()
@@ -141,9 +128,7 @@ def delete_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    document = get_document_or_404(db, doc_id)
-    if not can(db, current_user, document, "delete"):
-        raise HTTPException(status_code=403, detail="Not allowed")
+    document = authorize(db, current_user, db.get(Document, doc_id), "delete")
 
     file_path = (UPLOAD_DIR / document.stored_path).resolve()
     upload_root = UPLOAD_DIR.resolve()
@@ -159,6 +144,7 @@ def delete_document(
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+
 @router.post("/{doc_id}/share", response_model=ShareOut, status_code=status.HTTP_200_OK)
 def share_document(
     doc_id: int,
@@ -166,9 +152,7 @@ def share_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    document = get_document_or_404(db, doc_id)
-    if not can(db, current_user, document, "share"):
-        raise HTTPException(status_code=403, detail="Not allowed to share this document")
+    document = authorize(db, current_user, db.get(Document, doc_id), "share")
 
     if payload.level not in VALID_GRANT_LEVELS:
         raise HTTPException(status_code=400, detail="Invalid permission level. Use 'read' or 'edit'")
@@ -180,7 +164,6 @@ def share_document(
     if target_user.id == document.owner_id:
         raise HTTPException(status_code=400, detail="Cannot share a document with its owner")
 
-    # Check if a permission row already exists (upsert behavior)
     grant = db.scalar(
         select(Permission).where(
             Permission.document_id == document.id,
@@ -216,10 +199,7 @@ def list_document_shares(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    document = get_document_or_404(db, doc_id)
-    # Only owner can view the list of people with access
-    if not can(db, current_user, document, "share"):
-        raise HTTPException(status_code=403, detail="Not allowed")
+    document = authorize(db, current_user, db.get(Document, doc_id), "share")
 
     shares = db.scalars(
         select(Permission).where(Permission.document_id == document.id)
@@ -248,9 +228,7 @@ def revoke_document_share(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    document = get_document_or_404(db, doc_id)
-    if not can(db, current_user, document, "share"):
-        raise HTTPException(status_code=403, detail="Not allowed to revoke shares")
+    document = authorize(db, current_user, db.get(Document, doc_id), "share")
 
     grant = db.scalar(
         select(Permission).where(

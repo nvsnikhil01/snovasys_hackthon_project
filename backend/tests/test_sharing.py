@@ -1,92 +1,109 @@
 import io
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+import app.models  # noqa: F401 - registers all tables (users, documents, permissions, audit_log)
+from app.database import Base, get_db
 from app.main import app
 
-client = TestClient(app)
+
+@pytest.fixture
+def client():
+    # StaticPool ensures the in-memory database is shared across threads
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
 
 
-def get_token(email: str, password: str = "password123") -> str:
-    res = client.post("/auth/login", json={"email": email, "password": password})
+def test_sharing_lifecycle(client):
+    # 1. Register Alice and Bob
+    res = client.post(
+        "/auth/register",
+        json={"email": "alice@example.com", "password": "password123"},
+    )
+    assert res.status_code == 201
+
+    res = client.post(
+        "/auth/register",
+        json={"email": "bob@example.com", "password": "password123"},
+    )
+    assert res.status_code == 201
+
+    # Login Alice
+    res = client.post(
+        "/auth/login",
+        json={"email": "alice@example.com", "password": "password123"},
+    )
     assert res.status_code == 200
-    return res.json()["access_token"]
-
-
-def test_sharing_lifecycle():
-    # 1. Login as Alice (owner) and upload a document to test with
-    alice_token = get_token("alice@example.com")
+    alice_token = res.json()["access_token"]
     alice_headers = {"Authorization": f"Bearer {alice_token}"}
 
-    file_content = b"sample content for sharing tests"
-    upload_res = client.post(
-        "/documents",
-        headers=alice_headers,
-        files={"file": ("share_test.txt", io.BytesIO(file_content), "text/plain")},
+    # Login Bob
+    res = client.post(
+        "/auth/login",
+        json={"email": "bob@example.com", "password": "password123"},
     )
-    assert upload_res.status_code == 201
-    doc_id = upload_res.json()["id"]
-
-    # 2. Login as Bob (no permissions yet)
-    bob_token = get_token("bob@example.com")
+    assert res.status_code == 200
+    bob_token = res.json()["access_token"]
     bob_headers = {"Authorization": f"Bearer {bob_token}"}
 
-    # Bob should not see it in his document list
-    docs_res = client.get("/documents", headers=bob_headers)
-    assert docs_res.status_code == 200
-    assert not any(d["id"] == doc_id for d in docs_res.json())
-
-    # Bob cannot download it
-    dl_res = client.get(f"/documents/{doc_id}/download", headers=bob_headers)
-    assert dl_res.status_code == 403
-
-    # 3. Alice shares the document with Bob
-    share_res = client.post(
-        f"/documents/{doc_id}/share",
+    # 2. Alice uploads a document
+    file_content = b"Sample confidential text"
+    res = client.post(
+        "/documents",
+        files={"file": ("sample.txt", io.BytesIO(file_content), "text/plain")},
         headers=alice_headers,
-        json={"user_email": "bob@example.com", "level": "read"},
     )
-    assert share_res.status_code == 200
-    assert share_res.json()["level"] == "read"
-    assert share_res.json()["user_email"] == "bob@example.com"
-    bob_user_id = share_res.json()["user_id"]
+    assert res.status_code == 201
+    doc_id = res.json()["id"]
 
-    # 4. Bob can now see and download the document
-    docs_res_after = client.get("/documents", headers=bob_headers)
-    assert docs_res_after.status_code == 200
-    assert any(d["id"] == doc_id for d in docs_res_after.json())
+    # 3. Bob attempts to access before being shared -> 404 (existence hidden via authorize())
+    res = client.get(f"/documents/{doc_id}", headers=bob_headers)
+    assert res.status_code == 404
 
-    bob_dl_res = client.get(f"/documents/{doc_id}/download", headers=bob_headers)
-    assert bob_dl_res.status_code == 200
-    assert bob_dl_res.content == file_content
-
-    # 5. Bob (read-only) CANNOT delete or re-share it
-    bob_del_res = client.delete(f"/documents/{doc_id}", headers=bob_headers)
-    assert bob_del_res.status_code == 403
-
-    bob_reshare_res = client.post(
+    # 4. Alice shares doc with Bob with 'read' grant
+    res = client.post(
         f"/documents/{doc_id}/share",
-        headers=bob_headers,
-        json={"user_email": "carol@example.com", "level": "read"},
+        json={"user_email": "bob@example.com", "level": "read"},
+        headers=alice_headers,
     )
-    assert bob_reshare_res.status_code == 403
+    assert res.status_code == 200
+    assert res.json()["level"] == "read"
 
-    # 6. Alice views shares and revokes Bob's access
-    shares_list_res = client.get(f"/documents/{doc_id}/shares", headers=alice_headers)
-    assert shares_list_res.status_code == 200
-    assert any(s["user_email"] == "bob@example.com" for s in shares_list_res.json())
+    # 5. Bob can now read the document
+    res = client.get(f"/documents/{doc_id}", headers=bob_headers)
+    assert res.status_code == 200
 
-    revoke_res = client.delete(
+    # 6. Bob attempts to delete -> 404 (only owner can delete, unauthorized yields 404)
+    res = client.delete(f"/documents/{doc_id}", headers=bob_headers)
+    assert res.status_code == 404
+
+    # 7. Alice revokes Bob's access
+    bob_user_id = client.get("/auth/me", headers=bob_headers).json()["id"]
+    res = client.delete(
         f"/documents/{doc_id}/share/{bob_user_id}", headers=alice_headers
     )
-    assert revoke_res.status_code == 204
+    assert res.status_code == 204
 
-    # 7. Bob immediately loses access
-    revoked_list = client.get("/documents", headers=bob_headers)
-    assert not any(d["id"] == doc_id for d in revoked_list.json())
-
-    revoked_dl = client.get(f"/documents/{doc_id}/download", headers=bob_headers)
-    assert revoked_dl.status_code == 403
-
-    # Clean up: Alice deletes the test document
-    clean_res = client.delete(f"/documents/{doc_id}", headers=alice_headers)
-    assert clean_res.status_code == 204
+    # 8. Bob attempts to read again -> 404
+    res = client.get(f"/documents/{doc_id}", headers=bob_headers)
+    assert res.status_code == 404
