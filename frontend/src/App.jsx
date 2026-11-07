@@ -1,305 +1,120 @@
-import React, { useState, useEffect } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { apiRequest, apiUrl, downloadFile, getToken, setToken, clearToken } from "./api";
+import "./App.css";
+
+function Shield() { return <svg className="shield" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3 19 6v5.2c0 4.7-3 7.8-7 9.8-4-2-7-5.1-7-9.8V6l7-3Z" stroke="currentColor" strokeWidth="1.7"/><path d="m9 12 2 2 4-4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/></svg>; }
+const date = (v) => new Date(v).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+const size = (v) => v < 1048576 ? `${(v / 1024).toFixed(1)} KB` : `${(v / 1048576).toFixed(1)} MB`;
 
 export default function App() {
-  const [user, setUser] = useState(null);
-  const [authMode, setAuthMode] = useState("login");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [documents, setDocuments] = useState([]);
-  const [sharedDocuments, setSharedDocuments] = useState([]);
-  const [sharedDocsLoaded, setSharedDocsLoaded] = useState(false);
-  const [activeTab, setActiveTab] = useState('my-docs');
-  const [error, setError] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [shareDocId, setShareDocId] = useState(null);
-  const [shareEmail, setShareEmail] = useState("");
-  const [shareLevel, setShareLevel] = useState("read");
+  const [user, setUser] = useState(null), [authMode, setAuthMode] = useState("login");
+  const [email, setEmail] = useState(""), [password, setPassword] = useState("");
+  const [documents, setDocuments] = useState([]), [sharedDocuments, setSharedDocuments] = useState([]);
+  const [sharedDocsLoaded, setSharedDocsLoaded] = useState(false), [activeTab, setActiveTab] = useState("my-docs");
+  const [error, setError] = useState(""), [uploading, setUploading] = useState(false);
+  const [page, setPage] = useState("documents"), [uploadFile, setUploadFile] = useState(null), [query, setQuery] = useState("");
+  const [shareDocId, setShareDocId] = useState(null), [shareEmail, setShareEmail] = useState("");
+  const [shareLevel, setShareLevel] = useState("read"), [shares, setShares] = useState([]), [sharesLoading, setSharesLoading] = useState(false), [sharing, setSharing] = useState(false);
 
-  useEffect(() => {
-    if (getToken()) {
-      fetchUser();
-    }
-  }, []);
+  useEffect(() => { if (getToken()) fetchUser(); }, []);
+  useEffect(() => { if (shareDocId) loadShares(shareDocId); else setShares([]); }, [shareDocId]);
 
   async function fetchUser() {
-    try {
-      const u = await apiRequest("/auth/me");
-      setUser(u);
-      loadDocs();
-    } catch {
-      clearToken();
-      setUser(null);
-    }
+    try { const u = await apiRequest("/auth/me"); setUser(u); loadDocs(); }
+    catch { clearToken(); setUser(null); }
   }
-
-  async function loadDocs() {
-    try {
-      const docs = await apiRequest("/documents");
-      setDocuments(docs);
-    } catch (err) {
-      setError(err.message);
-    }
+  async function loadDocs() { try { setDocuments(await apiRequest("/documents")); } catch (err) { setError(err.message); } }
+  async function loadSharedDocs() { try { setSharedDocuments(await apiRequest("/documents/shared-with-me")); setSharedDocsLoaded(true); } catch (err) { setError(err.message); } }
+  async function loadShares(id) {
+    setSharesLoading(true);
+    try { setShares(await apiRequest(`/documents/${id}/shares`)); } catch (err) { setError(err.message); }
+    finally { setSharesLoading(false); }
   }
-
-  async function loadSharedDocs() {
-    try {
-      const docs = await apiRequest("/documents/shared-with-me");
-      setSharedDocuments(docs);
-      setSharedDocsLoaded(true);
-    } catch (err) {
-      setError(err.message);
-    }
-  }
-
   async function handleAuth(e) {
-    e.preventDefault();
-    setError("");
+    e.preventDefault(); setError("");
     try {
-      if (authMode === "register") {
-        await apiRequest("/auth/register", {
-          method: "POST",
-          body: JSON.stringify({ email, password }),
-        });
-      }
-      const data = await apiRequest("/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ email, password }),
-      });
-      setToken(data.access_token);
-      setEmail("");
-      setPassword("");
-      await fetchUser();
-    } catch (err) {
-      setError(err.message);
-    }
+      if (authMode === "register") await apiRequest("/auth/register", { method: "POST", body: JSON.stringify({ email, password }) });
+      const data = await apiRequest("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+      setToken(data.access_token); setEmail(""); setPassword(""); await fetchUser();
+    } catch (err) { setError(err.message); }
   }
-
   async function handleUpload(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    setUploading(true);
-    setError("");
-
-    const formData = new FormData();
-    formData.append("file", file);
-
-    try {
-      await apiRequest("/documents", { method: "POST", body: formData });
-      await loadDocs();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setUploading(false);
-      e.target.value = "";
-    }
-  }
-
-  async function handleDelete(docId) {
-    if (!confirm("Are you sure you want to delete this document?")) return;
-    try {
-      await apiRequest(`/documents/${docId}`, { method: "DELETE" });
-      setDocuments((current) => current.filter((doc) => doc.id !== docId));
-      setSharedDocuments((current) => current.filter((doc) => doc.id !== docId));
-    } catch (err) {
-      setError(err.message);
-    }
-  }
-
-  async function handleDownload(doc) {
-    setError("");
-    try {
-      await downloadFile(doc.id, doc.filename);
-    } catch (err) {
-      setError(err.message);
-    }
-  }
-
-  async function handleShare(e) {
     e.preventDefault();
-    setError("");
+    if (!uploadFile) return;
+    setUploading(true); setError("");
+    const formData = new FormData(); formData.append("file", uploadFile);
+    try { await apiRequest("/documents", { method: "POST", body: formData }); await loadDocs(); setUploadFile(null); setPage("documents"); }
+    catch (err) { setError(err.message); }
+    finally { setUploading(false); }
+  }
+  async function handleDelete(id) {
+    if (!confirm("Are you sure you want to delete this document?")) return;
+    try { await apiRequest(`/documents/${id}`, { method: "DELETE" }); setDocuments((items) => items.filter((d) => d.id !== id)); setSharedDocuments((items) => items.filter((d) => d.id !== id)); }
+    catch (err) { setError(err.message); }
+  }
+  async function handleDownload(doc) { setError(""); try { await downloadFile(doc.id, doc.filename); } catch (err) { setError(err.message); } }
+  async function handleShare(e) {
+    e.preventDefault(); setError(""); setSharing(true);
     try {
       const response = await fetch(apiUrl(`/documents/${shareDocId}/share`), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken()}`,
-        },
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify({ user_email: shareEmail, level: shareLevel }),
       });
       const data = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(data?.detail || "Failed to share document");
-      }
-      setShareDocId(null);
-      setShareEmail("");
-      alert("Document shared successfully!");
-    } catch (err) {
-      setError(err.message);
-    }
+      if (!response.ok) throw new Error(data?.detail || "Failed to share document");
+      setShareEmail(""); await loadShares(shareDocId);
+    } catch (err) { setError(err.message); }
+    finally { setSharing(false); }
   }
-
-  function handleLogout() {
-    clearToken();
-    setUser(null);
-    setDocuments([]);
-    setSharedDocuments([]);
-    setSharedDocsLoaded(false);
-    setActiveTab('my-docs');
+  async function revoke(userId) {
+    try { await apiRequest(`/documents/${shareDocId}/share/${userId}`, { method: "DELETE" }); setShares((items) => items.filter((g) => g.user_id !== userId)); }
+    catch (err) { setError(err.message); }
   }
+  function logout() { clearToken(); setUser(null); setDocuments([]); setSharedDocuments([]); setSharedDocsLoaded(false); setActiveTab("my-docs"); setPage("documents"); }
+  const list = activeTab === "my-docs" ? documents : sharedDocuments;
+  const filtered = useMemo(() => list.filter((d) => d.filename.toLowerCase().includes(query.trim().toLowerCase())), [list, query]);
 
-  if (!user) {
-    return (
-      <div style={{ maxWidth: 400, margin: "80px auto", fontFamily: "system-ui, sans-serif", padding: 24, border: "1px solid #ddd", borderRadius: 8, boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-          <span style={{ fontSize: 24 }}>🔒</span>
-          <h2 style={{ margin: 0 }}>TrustVault</h2>
-        </div>
-        {error && <div style={{ color: "red", marginBottom: 12, fontSize: 14 }}>{error}</div>}
-        <form onSubmit={handleAuth} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <input
-            type="email"
-            placeholder="Email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            style={{ padding: 10, borderRadius: 4, border: "1px solid #ccc" }}
-          />
-          <input
-            type="password"
-            placeholder="Password (min 8 chars)"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            style={{ padding: 10, borderRadius: 4, border: "1px solid #ccc" }}
-          />
-          <button type="submit" style={{ padding: 10, background: "#2563eb", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: "bold" }}>
-            {authMode === "login" ? "Log In" : "Register"}
-          </button>
-        </form>
-        <p style={{ marginTop: 16, textAlign: "center", fontSize: 14 }}>
-          {authMode === "login" ? "No account? " : "Already have an account? "}
-          <button
-            onClick={() => setAuthMode(authMode === "login" ? "register" : "login")}
-            style={{ background: "none", border: "none", color: "#2563eb", cursor: "pointer", textDecoration: "underline" }}
-          >
-            {authMode === "login" ? "Register" : "Log In"}
-          </button>
-        </p>
-      </div>
-    );
-  }
+  if (!user) return <main className="auth-shell"><section className="auth-card">
+    <div className="auth-brand"><span className="vault-mark"><Shield /></span><span className="eyebrow">PRIVATE FILES. PROTECTED.</span><h1>TrustVault</h1><p>Your secure workspace for important documents.</p></div>
+    {error && <div className="alert" role="alert">{error}</div>}
+    <form className="auth-form" onSubmit={handleAuth}>
+      <label className="field"><span>Email address</span><input type="email" autoComplete="email" placeholder="you@example.com" required value={email} onChange={(e) => setEmail(e.target.value)} /></label>
+      <label className="field"><span>Password</span><input type="password" autoComplete={authMode === "login" ? "current-password" : "new-password"} placeholder="At least 8 characters" required value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+      <button className="button button-primary button-wide" type="submit">{authMode === "login" ? "Log in" : "Create account"} <span>→</span></button>
+    </form>
+    <p className="auth-switch">{authMode === "login" ? "New to TrustVault?" : "Already have an account?"} <button className="text-button" onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setError(""); }}>{authMode === "login" ? "Create an account" : "I already have an account"}</button></p>
+  </section></main>;
 
-  return (
-    <div style={{ maxWidth: 800, margin: "40px auto", fontFamily: "system-ui, sans-serif", padding: "0 16px" }}>
-      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #eee", paddingBottom: 16, marginBottom: 24 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 24 }}>🔒</span>
-          <h1 style={{ margin: 0, fontSize: 24 }}>TrustVault</h1>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 14, color: "#666" }}>{user.email} ({user.role})</span>
-          <button onClick={handleLogout} style={{ padding: "6px 12px", border: "1px solid #ccc", background: "#fff", borderRadius: 4, cursor: "pointer" }}>
-            🚪 Logout
-          </button>
-        </div>
-      </header>
+  return <div className="app-shell">
+    <header className="topbar"><a className="brand" href="#" onClick={(e) => { e.preventDefault(); setPage("documents"); }}><span className="brand-icon"><Shield /></span><span>Trust<span className="gold">Vault</span></span></a>
+      <div className="account"><span className="avatar">{user.email?.[0]?.toUpperCase()}</span><span className="account-email">{user.email}<small>{user.role}</small></span><button className="button button-quiet" onClick={logout}>Log out</button></div></header>
+    <main className="main-content">
+      <div className="page-heading"><div><span className="eyebrow">SECURE FILE SPACE</span><h1>{page === "upload" ? "Upload a document" : page === "search" ? "Search documents" : "Your documents"}</h1><p>Keep your important files organized and access controlled.</p></div>
+        {page === "documents" && <div className="heading-actions"><button className="button button-secondary" onClick={() => setPage("search")}>⌕ Search documents</button><button className="button button-primary" onClick={() => { setUploadFile(null); setPage("upload"); }}>＋ Upload a document</button></div>}</div>
+      {error && <div className="alert alert-banner" role="alert">{error}<button className="text-button" onClick={() => setError("")}>Dismiss</button></div>}
 
-      {error && <div style={{ color: "red", marginBottom: 16, padding: 8, background: "#fee2e2", borderRadius: 4 }}>{error}</div>}
+      {page === "upload" && <section className="panel upload-panel"><h2>Add a document</h2><p className="panel-subtitle">Select a file to add it to your vault.</p><form onSubmit={handleUpload}>
+        <label className="dropzone"><input className="file-input" type="file" accept=".pdf,.png,.jpg,.jpeg,.txt" onChange={(e) => setUploadFile(e.target.files?.[0] || null)} /><span className="upload-icon">↑</span><strong>{uploadFile ? uploadFile.name : "Choose a file to upload"}</strong><small>{uploadFile ? size(uploadFile.size) : "PDF, PNG, JPG or TXT · up to 5 MB"}</small><span className="button button-secondary">Browse files</span></label>
+        <p className="form-note">The filename is used as the document title in this workspace.</p><div className="form-actions"><button type="button" className="button button-quiet" onClick={() => setPage("documents")}>Back</button><button className="button button-primary" type="submit" disabled={!uploadFile || uploading}>{uploading ? "Uploading…" : "Upload document"}</button></div></form></section>}
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <h2 style={{ margin: 0, fontSize: 18 }}>Documents</h2>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", background: "#2563eb", color: "#fff", borderRadius: 4, cursor: "pointer", fontWeight: "bold" }}>
-          📤 {uploading ? "Uploading..." : "Upload File"}
-          <input type="file" onChange={handleUpload} disabled={uploading} style={{ display: "none" }} />
-        </label>
-      </div>
+      {page === "search" && <section className="panel search-panel"><label className="field"><span>Search by filename</span><input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Type a filename…" /></label><p className="form-note">Search filters documents in the selected list.</p><div className="form-actions"><button className="button button-quiet" onClick={() => { setQuery(""); setPage("documents"); }}>Back to documents</button></div></section>}
 
-      <div role="tablist" aria-label="Document lists" style={{ display: "flex", gap: 8, borderBottom: "1px solid #eee", marginBottom: 16 }}>
-        <button role="tab" aria-selected={activeTab === 'my-docs'} onClick={() => setActiveTab('my-docs')} style={{ padding: "8px 12px", border: 0, borderBottom: activeTab === 'my-docs' ? "2px solid #2563eb" : "2px solid transparent", background: "none", color: activeTab === 'my-docs' ? "#2563eb" : "#666", cursor: "pointer", fontWeight: activeTab === 'my-docs' ? "bold" : "normal" }}>
-          My Documents
-        </button>
-        <button role="tab" aria-selected={activeTab === 'shared-with-me'} onClick={() => { setActiveTab('shared-with-me'); if (!sharedDocsLoaded) loadSharedDocs(); }} style={{ padding: "8px 12px", border: 0, borderBottom: activeTab === 'shared-with-me' ? "2px solid #2563eb" : "2px solid transparent", background: "none", color: activeTab === 'shared-with-me' ? "#2563eb" : "#666", cursor: "pointer", fontWeight: activeTab === 'shared-with-me' ? "bold" : "normal" }}>
-          Shared with Me
-        </button>
-      </div>
+      {page === "documents" && <><div className="overview"><div className="overview-card"><span className="overview-icon">▤</span><span><b>{documents.length}</b><small>My documents</small></span></div><div className="overview-card"><span className="overview-icon neutral">⇆</span><span><b>{sharedDocuments.length}</b><small>Shared with me</small></span></div><div className="trust-caption"><Shield /> Access is checked on every request</div></div>
+        <section className="documents-panel"><div className="section-heading"><div><h2>Documents</h2><p>Manage your files and shared access.</p></div><span className="count">{list.length} files</span></div>
+          <div className="tabs" role="tablist" aria-label="Document lists"><button role="tab" aria-selected={activeTab === "my-docs"} className={activeTab === "my-docs" ? "tab active" : "tab"} onClick={() => setActiveTab("my-docs")}>My documents <span>{documents.length}</span></button><button role="tab" aria-selected={activeTab === "shared-with-me"} className={activeTab === "shared-with-me" ? "tab active" : "tab"} onClick={() => { setActiveTab("shared-with-me"); if (!sharedDocsLoaded) loadSharedDocs(); }}>Shared with me <span>{sharedDocuments.length}</span></button></div>
+          {filtered.length === 0 ? <div className="empty-state"><span className="empty-icon">{query ? "⌕" : activeTab === "my-docs" ? "▤" : "⇆"}</span><h3>{query ? "No matching documents" : activeTab === "my-docs" ? "Your vault is ready" : "Nothing has been shared with you"}</h3><p>{query ? "Try searching for another filename." : activeTab === "my-docs" ? "You have not uploaded any documents yet." : "Documents shared with you will appear here."}</p>{activeTab === "my-docs" && !query && <button className="button button-primary" onClick={() => setPage("upload")}>＋ Upload your first document</button>}</div> :
+            <div className="document-list">{filtered.map((doc) => <article className="document-row" key={doc.id}><div className="document-details"><span className="file-mark">FILE</span><div><h3 title={doc.filename}>{doc.filename}</h3><p>{size(doc.size)} <i>·</i> Added {date(doc.created_at)}</p></div></div><div className="document-actions"><button className="button button-secondary button-sm" onClick={() => handleDownload(doc)}>↓ Download</button>{activeTab === "my-docs" && doc.owner_id === user.id && <><button className="button button-outline button-sm" onClick={() => setShareDocId(doc.id)}>Share</button><button className="button button-danger button-sm" onClick={() => handleDelete(doc.id)}>Delete</button></>}</div></article>)}</div>}
+        </section></>}
+    </main>
+    <footer className="footer"><span><Shield /> TrustVault</span><span>Private by design</span></footer>
 
-      <div style={{ border: "1px solid #eee", borderRadius: 6, overflow: "hidden" }}>
-        {(activeTab === 'my-docs' ? documents : sharedDocuments).length === 0 ? (
-          <div style={{ padding: 32, textAlign: "center", color: "#888" }}>{activeTab === 'my-docs' ? "No documents available. Upload one to get started." : "No documents have been shared with you."}</div>
-        ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
-            <thead style={{ background: "#f8fafc", borderBottom: "1px solid #eee" }}>
-              <tr>
-                <th style={{ padding: 12 }}>Name</th>
-                <th style={{ padding: 12 }}>Size</th>
-                <th style={{ padding: 12 }}>Uploaded</th>
-                <th style={{ padding: 12, textAlign: "right" }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(activeTab === 'my-docs' ? documents : sharedDocuments).map((doc) => (
-                <tr key={doc.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                  <td style={{ padding: 12 }}>📄 {doc.filename}</td>
-                  <td style={{ padding: 12 }}>{(doc.size / 1024).toFixed(1)} KB</td>
-                  <td style={{ padding: 12 }}>{new Date(doc.created_at).toLocaleDateString()}</td>
-                  <td style={{ padding: 12, textAlign: "right" }}>
-                    <button onClick={() => handleDownload(doc)} title="Download" aria-label={`Download ${doc.filename}`} style={{ marginRight: 8, border: "none", background: "none", cursor: "pointer", fontSize: 16 }}>
-                      📥
-                    </button>
-                    {doc.owner_id === user.id && (
-                      <>
-                        <button onClick={() => setShareDocId(doc.id)} title="Share" style={{ marginRight: 8, border: "none", background: "none", cursor: "pointer", fontSize: 16 }}>
-                          🔗
-                        </button>
-                        <button onClick={() => handleDelete(doc.id)} title="Delete" style={{ border: "none", background: "none", cursor: "pointer", fontSize: 16 }}>
-                          🗑️
-                        </button>
-                      </>
-                    )}
-                    {doc.owner_id !== user.id && (
-                      <>
-                        <button type="button" title="Only the owner can share this document" aria-label={`Share ${doc.filename}`} disabled style={{ marginRight: 8, border: "none", background: "none", cursor: "not-allowed", opacity: 0.4, fontSize: 16 }}>Share</button>
-                        <button type="button" title="Only the owner can delete this document" aria-label={`Delete ${doc.filename}`} disabled style={{ border: "none", background: "none", cursor: "not-allowed", opacity: 0.4, fontSize: 16 }}>Delete</button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {shareDocId && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ background: "#fff", padding: 24, borderRadius: 8, width: 340 }}>
-            <h3 style={{ marginTop: 0 }}>Share Document</h3>
-            <form onSubmit={handleShare} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <input
-                type="email"
-                placeholder="Target email"
-                required
-                value={shareEmail}
-                onChange={(e) => setShareEmail(e.target.value)}
-                style={{ padding: 8, borderRadius: 4, border: "1px solid #ccc" }}
-              />
-              <select value={shareLevel} onChange={(e) => setShareLevel(e.target.value)} style={{ padding: 8, borderRadius: 4, border: "1px solid #ccc" }}>
-                <option value="read">Read Only</option>
-                <option value="edit">Edit Permission</option>
-              </select>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
-                <button type="button" onClick={() => setShareDocId(null)} style={{ padding: "6px 12px", border: "1px solid #ccc", background: "#fff", borderRadius: 4, cursor: "pointer" }}>
-                  Cancel
-                </button>
-                <button type="submit" style={{ padding: "6px 12px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>
-                  Share
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+    {shareDocId && <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setShareDocId(null); }}><section className="share-modal" role="dialog" aria-modal="true" aria-labelledby="share-title"><div className="modal-heading"><div><span className="eyebrow">DOCUMENT ACCESS</span><h2 id="share-title">Share document</h2><p>Choose who can access this file.</p></div><button className="close-button" aria-label="Close" onClick={() => setShareDocId(null)}>×</button></div>
+      <form onSubmit={handleShare}><label className="field"><span>Email address</span><input type="email" placeholder="colleague@example.com" required value={shareEmail} onChange={(e) => setShareEmail(e.target.value)} /></label>
+        <fieldset className="permission-options"><legend>Permission level</legend><label className={shareLevel === "read" ? "permission-card selected" : "permission-card"}><input type="radio" name="permission" value="read" checked={shareLevel === "read"} onChange={() => setShareLevel("read")} /><span className="radio-dot" /><span><b>Read</b><small>View and download only</small></span></label><label className={shareLevel === "edit" ? "permission-card selected" : "permission-card"}><input type="radio" name="permission" value="edit" checked={shareLevel === "edit"} onChange={() => setShareLevel("edit")} /><span className="radio-dot" /><span><b>Edit</b><small>Modify and re-share</small></span></label></fieldset>
+        <div className="modal-actions"><button className="button button-quiet" type="button" onClick={() => setShareDocId(null)}>Done</button><button className="button button-primary" disabled={sharing}>{sharing ? "Saving…" : "Grant access"}</button></div></form>
+      <div className="access-list"><div className="access-title"><h3>Who has access</h3><span>{shares.length}</span></div>{sharesLoading ? <p className="access-empty">Loading access list…</p> : shares.length === 0 ? <p className="access-empty">No one else has access yet.</p> : shares.map((grant) => <div className="grant-row" key={grant.id}><span className="grant-avatar">{grant.user_email[0]?.toUpperCase()}</span><span className="grant-user"><b>{grant.user_email}</b><small>{grant.level === "edit" ? "Can edit" : "Can read"}</small></span><button className="revoke-button" onClick={() => revoke(grant.user_id)}>Revoke</button></div>)}</div>
+    </section></div>}
+  </div>;
 }
+
+
