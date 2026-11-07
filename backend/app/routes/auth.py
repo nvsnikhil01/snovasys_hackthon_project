@@ -37,6 +37,10 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=TokenOut)
 def login(data: LoginRequest, db: Session = Depends(get_db)):
+    if len(data.password.encode("utf-8")) > 72:
+        from app.audit import log_event
+        log_event(db, None, "login", None, "denied")
+        raise HTTPException(status_code=401, detail="Invalid email or password")
     email = data.email.strip().lower()
     user = db.scalar(select(User).where(User.email == email))
 
@@ -44,8 +48,12 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
     password_ok = verify_password(data.password, user.password_hash if user else DUMMY_HASH)
 
     if user is None or not password_ok:
+        from app.audit import log_event
+        log_event(db, user.id if user else None, "login", None, "denied")
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
+    from app.audit import log_event
+    log_event(db, user.id, "login", None, "allowed")
     return TokenOut(access_token=create_access_token(user.id))
 @router.get("/me", response_model=UserOut)
 def me(current_user: User = Depends(get_current_user)):

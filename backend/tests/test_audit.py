@@ -1,4 +1,5 @@
 import pytest
+from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -43,3 +44,26 @@ def test_deleted_row_is_detected(db):
     db.delete(db.get(AuditLog, 2))
     db.commit()
     assert verify_chain(db)["ok"] is False
+
+
+def test_concurrent_writers_keep_the_chain_valid():
+    engine = create_engine("sqlite:///./concurrent-audit-test.db", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+
+    def write_events(worker):
+        with factory() as session:
+            for index in range(15):
+                log_event(session, worker, "read", index, "allowed")
+
+    try:
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            list(executor.map(write_events, range(8)))
+        with factory() as session:
+            assert verify_chain(session)["ok"] is True
+    finally:
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+        import os
+        if os.path.exists("./concurrent-audit-test.db"):
+            os.remove("./concurrent-audit-test.db")

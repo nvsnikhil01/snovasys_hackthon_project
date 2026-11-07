@@ -41,10 +41,13 @@ export async function apiRequest(endpoint, options = {}) {
 
 export async function downloadFile(docId, filename) {
   const token = getToken();
-  const res = await fetch(apiUrl(`/documents/${docId}/download`), {
+  const res = await fetch(apiUrl(`documents/${docId}/download`), {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error("Download failed");
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.detail || "Request failed");
+  }
 
   const blob = await res.blob();
   const url = window.URL.createObjectURL(blob);

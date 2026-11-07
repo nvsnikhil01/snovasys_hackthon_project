@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -30,12 +30,12 @@ def list_all_documents_metadata(
 
 @router.get("/audit")
 def audit_entries(
-    limit: int = 100,
+    limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
     user: User = Depends(require_role("admin", "auditor")),
 ):
     rows = db.scalars(
-        select(AuditLog).order_by(AuditLog.id.desc()).limit(min(limit, 500))
+        select(AuditLog).order_by(AuditLog.id.desc()).limit(limit)
     ).all()
     return [
         {

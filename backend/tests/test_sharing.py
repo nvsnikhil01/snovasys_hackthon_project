@@ -1,5 +1,6 @@
 import io
 import pytest
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -11,7 +12,8 @@ from app.main import app
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch, tmp_path):
+    monkeypatch.setattr("app.routes.documents.UPLOAD_DIR", tmp_path)
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -139,3 +141,9 @@ def test_upload_rejects_spoofed_magic_bytes(client):
         headers=headers,
     )
     assert res.status_code == 400
+
+
+def test_login_with_overlong_multibyte_password_is_401_not_500(client):
+    response = client.post("/auth/login", json={"email": "nobody@example.com", "password": "Ã©" * 60})
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid email or password"}

@@ -138,6 +138,7 @@ def list_shared_documents(
         .join(Permission, Permission.document_id == Document.id)
         .where(
             Permission.user_id == current_user.id,
+            Permission.level.in_(VALID_GRANT_LEVELS),
             Document.owner_id != current_user.id,
         )
         .order_by(Document.id)
@@ -167,12 +168,9 @@ def download_document(
     if not file_path.is_relative_to(upload_root) or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Stored file is missing")
 
-    return FileResponse(
-        path=file_path,
-        media_type="application/octet-stream",
-        filename=document.filename,
-        content_disposition_type="attachment",
-    )
+    response = FileResponse(path=file_path, filename=document.filename, media_type="application/octet-stream")
+    log_event(db, current_user.id, "download", document.id, "allowed")
+    return response
 
 
 @router.delete("/{doc_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -194,6 +192,8 @@ def delete_document(
 
     if file_path.is_file():
         file_path.unlink()
+
+    log_event(db, current_user.id, "delete", document.id, "allowed")
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -237,6 +237,7 @@ def share_document(
 
     db.commit()
     db.refresh(grant)
+    log_event(db, current_user.id, "grant_access", document.id, "allowed")
 
     return ShareOut(
         id=grant.id,
@@ -295,4 +296,5 @@ def revoke_document_share(
 
     db.delete(grant)
     db.commit()
+    log_event(db, current_user.id, "revoke_access", document.id, "allowed")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

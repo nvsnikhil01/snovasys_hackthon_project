@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 import os
+import threading
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -17,6 +18,7 @@ if not AUDIT_KEY:
     AUDIT_KEY = "local-dev-audit-key"
 
 GENESIS = "GENESIS"
+_WRITE_LOCK = threading.Lock()
 
 
 def _stamp(ts: datetime) -> str:
@@ -37,20 +39,17 @@ def _compute_hash(prev_hash, ts, user_id, action, document_id, result) -> str:
 
 def log_event(db: Session, user_id, action: str, document_id, result: str) -> AuditLog:
     """Appends one row to the log. result is 'allowed' or 'denied'."""
-    last = db.scalar(select(AuditLog).order_by(AuditLog.id.desc()).limit(1))
-    prev_hash = last.hash if last else GENESIS
-    ts = datetime.now(timezone.utc)
-    entry = AuditLog(
-        timestamp=ts,
-        user_id=user_id,
-        action=action,
-        document_id=document_id,
-        result=result,
-        prev_hash=prev_hash,
-        hash=_compute_hash(prev_hash, ts, user_id, action, document_id, result),
-    )
-    db.add(entry)
-    db.commit()  # committed immediately so denied attempts survive request failures
+    with _WRITE_LOCK:
+        last = db.scalar(select(AuditLog).order_by(AuditLog.id.desc()).limit(1))
+        prev_hash = last.hash if last else GENESIS
+        ts = datetime.now(timezone.utc)
+        entry = AuditLog(
+            timestamp=ts, user_id=user_id, action=action, document_id=document_id,
+            result=result, prev_hash=prev_hash,
+            hash=_compute_hash(prev_hash, ts, user_id, action, document_id, result),
+        )
+        db.add(entry)
+        db.commit()
     return entry
 
 
