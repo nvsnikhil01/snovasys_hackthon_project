@@ -1,7 +1,7 @@
 const API_URL = import.meta.env.VITE_API_URL || "https://snovasys-hackthon-project.onrender.com";
 const API_BASE_URL = API_URL.replace(/\/+$/, "");
 
-function apiUrl(endpoint) {
+export function apiUrl(endpoint) {
   return `${API_BASE_URL}/${endpoint.replace(/^\/+/, "")}`;
 }
 
