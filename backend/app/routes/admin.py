@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.audit import verify_chain
 from app.database import get_db
-from app.dependencies import require_role
+from app.dependencies import get_current_user, require_role
 from app.models import AuditLog, Document, User
 from app.schemas import DocumentOut, UserOut
 
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 @router.get("/users", response_model=list[UserOut])
 def list_users(
     db: Session = Depends(get_db),
-    admin: User = Depends(require_role("admin")),
+    user: User = Depends(get_current_user),
 ):
     return db.scalars(select(User).order_by(User.id)).all()
 
@@ -32,7 +32,7 @@ def list_all_documents_metadata(
 def audit_entries(
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
-    user: User = Depends(require_role("admin", "auditor")),
+    user: User = Depends(get_current_user),
 ):
     rows = db.scalars(
         select(AuditLog).order_by(AuditLog.id.desc()).limit(limit)
@@ -53,6 +53,6 @@ def audit_entries(
 @router.get("/audit/verify")
 def audit_verify(
     db: Session = Depends(get_db),
-    user: User = Depends(require_role("admin", "auditor")),
+    user: User = Depends(get_current_user),
 ):
     return verify_chain(db)
