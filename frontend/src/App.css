@@ -867,3 +867,33 @@
 }
 
 
+.role-badge {
+  display:inline-flex;
+  align-items:center;
+  border:1px solid var(--line, #ded8c9);
+  border-radius:999px;
+  padding:6px 10px;
+  color:var(--ink, #25302b);
+  background:#f7f4ec;
+  font-size:12px;
+  font-weight:700
+}
+.data-table {
+  width:100%;
+  border-collapse:collapse;
+  font-size:13px
+}
+.data-table th,.data-table td {
+  padding:12px 14px;
+  border-bottom:1px solid #e9e5dc;
+  text-align:left;
+  vertical-align:top
+}
+.data-table th {
+  color:#686d67;
+  background:#faf9f6;
+  font-size:11px;
+  letter-spacing:.04em;
+  text-transform:uppercase
+}
+.documents-panel { overflow-x:auto }

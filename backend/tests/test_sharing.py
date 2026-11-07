@@ -1,6 +1,5 @@
 import io
 import pytest
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -144,6 +143,56 @@ def test_upload_rejects_spoofed_magic_bytes(client):
 
 
 def test_login_with_overlong_multibyte_password_is_401_not_500(client):
-    response = client.post("/auth/login", json={"email": "nobody@example.com", "password": "Ã©" * 60})
+    response = client.post("/auth/login", json={"email": "nobody@example.com", "password": "\u00e9" * 60})
     assert response.status_code == 401
     assert response.json() == {"detail": "Invalid email or password"}
+
+
+@pytest.mark.parametrize("method,route,status,kwargs", [
+    ("get", "", 200, {}),
+    ("get", "/download", 200, {}),
+    ("put", "", 200, {"files": {"file": ("updated.txt", b"updated", "text/plain")}}),
+    ("delete", "", 204, {}),
+    ("post", "/share", 200, {"json": {"user_email": "bob@example.com", "level": "read"}}),
+    ("get", "/shares", 200, {}),
+    ("delete", "/share/{bob_id}", 204, {}),
+])
+def test_every_document_route_checks_permissions(client, method, route, status, kwargs):
+    for email in ("owner@example.com", "bob@example.com", "stranger@example.com"):
+        client.post("/auth/register", json={"email": email, "password": "password123"})
+    def login(email):
+        token = client.post("/auth/login", json={"email": email, "password": "password123"}).json()["access_token"]
+        return {"Authorization": f"Bearer {token}"}
+    owner_headers, bob_headers, stranger_headers = map(login, ("owner@example.com", "bob@example.com", "stranger@example.com"))
+    doc_id = client.post("/documents", files={"file": ("sample.txt", b"hello", "text/plain")}, headers=owner_headers).json()["id"]
+    bob_id = client.get("/auth/me", headers=bob_headers).json()["id"]
+    client.post(f"/documents/{doc_id}/share", json={"user_email": "bob@example.com", "level": "read"}, headers=owner_headers)
+    path = f"/documents/{doc_id}" + route.format(bob_id=bob_id)
+    stranger_response = getattr(client, method)(path, headers=stranger_headers, **kwargs)
+    assert stranger_response.status_code == 404
+    assert stranger_response.json() == {"detail": "Not found"}
+    owner_response = getattr(client, method)(path, headers=owner_headers, **kwargs)
+    assert owner_response.status_code == status
+
+
+def test_shared_with_me_ignores_invalid_permission_levels(client):
+    from app.database import get_db
+    from app.models import Document, Permission
+    client.post("/auth/register", json={"email": "owner@example.com", "password": "password123"})
+    client.post("/auth/register", json={"email": "reader@example.com", "password": "password123"})
+    tokens = {email: client.post("/auth/login", json={"email": email, "password": "password123"}).json()["access_token"] for email in ("owner@example.com", "reader@example.com")}
+    headers = {email: {"Authorization": f"Bearer {token}"} for email, token in tokens.items()}
+    owner_id = client.get("/auth/me", headers=headers["owner@example.com"]).json()["id"]
+    reader_id = client.get("/auth/me", headers=headers["reader@example.com"]).json()["id"]
+    db = next(app.dependency_overrides[get_db]())
+    try:
+        document = Document(owner_id=owner_id, filename="private.txt", stored_path="missing.bin", size=1)
+        db.add(document)
+        db.flush()
+        db.add(Permission(document_id=document.id, user_id=reader_id, level="invalid"))
+        db.commit()
+    finally:
+        db.close()
+    response = client.get("/documents/shared-with-me", headers=headers["reader@example.com"])
+    assert response.status_code == 200
+    assert response.json() == []

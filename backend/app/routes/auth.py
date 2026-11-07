@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.dependencies import get_current_user
 
 from app.database import get_db
-from app.models import User
+from app.models import AuditLog, User
 from app.schemas import LoginRequest, RegisterRequest, TokenOut, UserOut
 from app.security import create_access_token, hash_password, verify_password
 
@@ -58,3 +58,14 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
 @router.get("/me", response_model=UserOut)
 def me(current_user: User = Depends(get_current_user)):
     return current_user
+
+
+@router.get("/activity")
+def activity(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    query = select(AuditLog)
+    if current_user.role not in {"admin", "auditor"}:
+        query = query.where(AuditLog.user_id == current_user.id)
+    rows = db.scalars(query.order_by(AuditLog.id.desc()).limit(500)).all()
+    return [{"id": row.id, "timestamp": row.timestamp, "user_id": row.user_id,
+             "action": row.action, "document_id": row.document_id, "result": row.result}
+            for row in rows]

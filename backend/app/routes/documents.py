@@ -79,6 +79,7 @@ def upload(
         filename=filename,
         stored_path=stored_name,
         size=len(data),
+        content=data,
     )
     db.add(document)
     db.commit()
@@ -109,6 +110,7 @@ def update_document(
     document.filename = filename
     document.stored_path = new_stored_name
     document.size = len(data)
+    document.content = data
     db.commit()
     db.refresh(document)
 
@@ -165,7 +167,14 @@ def download_document(
 
     file_path = (UPLOAD_DIR / document.stored_path).resolve()
     upload_root = UPLOAD_DIR.resolve()
-    if not file_path.is_relative_to(upload_root) or not file_path.is_file():
+    if not file_path.is_relative_to(upload_root):
+        raise HTTPException(status_code=404, detail="Stored file is missing")
+
+    if not file_path.is_file() and document.content is not None:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(document.content)
+
+    if not file_path.is_file():
         raise HTTPException(status_code=404, detail="Stored file is missing")
 
     response = FileResponse(path=file_path, filename=document.filename, media_type="application/octet-stream")
