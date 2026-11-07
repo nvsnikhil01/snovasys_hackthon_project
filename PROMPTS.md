@@ -74,6 +74,21 @@ I use AI tools and record every use here, including where they were wrong.
 - What I tested: tested download with path checks, tried accessing missing vs unauthorized IDs, and ran all 10 pytest tests (all passed).
 - What I changed: added `.resolve()` directory boundary validation so downloads and deletes can never escape `UPLOAD_DIR`.
 
+## 6 Nov 2026
+- Tool: Codex (ChatGPT) in VS Code
+- Used it for: comparing the early `sample_V1` prototype against the current project in `D:/snovasys_hackthon_project` across UI styling, authentication hardening, and file/audit protections.
+- What it found:
+  1. UI styling: The prototype used dark theme design tokens, shared layout classes, and structured modal/table styles, whereas the current frontend relied heavily on scattered inline styles.
+  2. Auth hardening: The prototype implemented login rate limiting and database-backed revocable sessions, while current auth uses short-lived JWTs without server-side revocation.
+  3. File & audit protections: The prototype featured explicit upload validators and tamper-evident triggers; current project already has server-side `can()` default-deny checks and path traversal protection.
+- What I kept: the UI recommendations (design tokens, dark/amber theme, dedicated component styling) and the prompt to overhaul the React frontend.
+- What I changed or rejected: postponed database-backed session revocation to keep the current stateless JWT architecture stable for the demo deadline.
+
+## 6 Nov 2026 (second entry)
+- Tool: Gemini
+- Used it for: drafting the UI refactoring prompt for Codex and generating updated documentation entries for `DAILY_LOG.md` and `README.md`.
+- What I did myself: reviewed screen mockups, selected color palette tokens, and updated documentation files manually.
+
 ## Mistakes the AI made
 - 1 Nov: Claude gave me Command Prompt commands (rmdir /s /q) while I was in PowerShell, so they failed. I used the PowerShell equivalent.
 - 1 Nov: Claude told me to pick "Installer" on nodejs.org, but the page no longer offers that option. I used winget instead.

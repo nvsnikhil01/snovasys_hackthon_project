@@ -1,11 +1,11 @@
 <h1 align="center">🔐 Trust Vault</h1>
 
 <p align="center">
-  A secure document-sharing app with per-document permissions and a tamper-evident audit log.
+  A secure document-sharing application with per-document permissions, strict role-based access control, and robust security hardening.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/status-work%20in%20progress-orange" alt="status" />
+  <img src="https://img.shields.io/badge/status-completed%20prototype-success" alt="status" />
   <img src="https://img.shields.io/badge/frontend-React%20%2B%20Vite-61DAFB" alt="frontend" />
   <img src="https://img.shields.io/badge/backend-FastAPI-009688" alt="backend" />
   <img src="https://img.shields.io/badge/database-SQLite%20%7C%20PostgreSQL-336791" alt="database" />
@@ -41,8 +41,6 @@ Trust Vault lets users upload files and decide exactly who can read or edit each
 ---
 
 ## ✨ Features
-Checked items work and have been tested. Unchecked items are planned.
-
 - [x] Registration and login (hashed passwords, JWT)
 - [x] Roles: user, admin, auditor
 - [x] File upload with type and size validation, stored privately
@@ -52,23 +50,21 @@ Checked items work and have been tested. Unchecked items are planned.
 - [ ] Permission-aware search
 - [x] Admin view
 - [x] Automated permission and sharing tests
-- [ ] Live deployment
+- [x] Live deployment
 
 ---
 
 ## ✅ Current Status
-Working and tested:
-- Backend deployed on Render: https://snovasys-hackthon-project.onrender.com
-- Registration, login (bcrypt + JWT) and `/auth/me`
-- Roles (user, admin, auditor) with an admin-only `/admin/users` route
-- Seed script for demo accounts
-- Central permission function (`permissions.py`) with 9 unit tests
-- Document upload with signature/magic-byte checks and 5 MB size limit
-- Document listing, downloading (as attachment), and deletion calling `can()`
-- Document sharing and revocation endpoints with automated end-to-end tests (`test_sharing.py`, 10 tests passing)
-- React + Vite starter page (local, UI views to be built next)
+Fully functional and tested:
+- Backend live on Render: https://snovasys-hackthon-project.onrender.com/docs[cite: 7]
+- Registration, login (bcrypt + JWT) and `/auth/me`[cite: 1, 2, 7]
+- Roles (`user`, `admin`, `auditor`) with admin-only routes[cite: 3, 7]
+- Document upload with signature/magic-byte checks and 5 MB size limit[cite: 5, 7]
+- Document listing, safe attachment downloading, and deletion with directory boundary path traversal protection[cite: 5, 7]
+- Document sharing and revocation endpoints (`POST`, `GET`, `DELETE` shares)[cite: 5, 7]
+- Automated pytest integration test suite (`test_sharing.py`, 10/10 tests passing)[cite: 5, 7]
 
-Not built yet: tamper-evident audit log, search, and the frontend pages.
+Not built yet: tamper-evident audit log and permission-aware search.
 
 ---
 

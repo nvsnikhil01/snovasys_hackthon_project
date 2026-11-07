@@ -106,3 +106,22 @@ One entry per day, written at the end of the day. Only what really happened.
 
 **Tomorrow**
 - Tamper-evident SHA-256 audit log, Postgres database attachment on Render
+
+---
+
+## Day 6: Fri 6 Nov
+**Done**
+- Evaluated early `sample_V1` prototype against current implementation with Codex for UI design and security hardening gaps
+- Planned migration from inconsistent inline styles to a centralized design system using a dark amber/gold cyber-vault theme
+- Documented key UX layouts matching mobile/desktop references: login/registration cards, dashboard document listings ("My documents" and "Shared with me"), upload modal, and the bottom-sheet share access picker
+- Identified future hardening targets from prototype comparison: login rate limiting, session revocation, and explicit audit trigger verification
+
+**Not done / problems**
+- Zipped prototype initially included `.venv` and cache files, which caused file analysis limits; bypassed by inspecting custom code paths locally
+- Frontend full restyling implementation queued for final polish
+
+**AI used today**
+- Codex: prototype code comparison, security review, and UI design evaluation. Gemini: planning prompt generation and Markdown documentation synchronization. Details in PROMPTS.md.
+
+**Tomorrow**
+- Complete UI styling overhaul, wire up frontend sharing views to backend endpoints, and final submission prep
