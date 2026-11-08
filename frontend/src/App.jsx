@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiRequest, apiUrl, downloadFile, getToken, setToken, clearToken } from "./api";
 import { auditExportFilename, buildAuditExport, captureAuditFilters, fetchAllMatchingAuditEntries } from "./auditExport";
+import { activityExportFilename, buildActivityExport, captureActivityFilters, fetchAllMatchingActivity } from "./activityHistory";
 import "./App.css";
 
 function Shield() { return <svg className="shield" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3 19 6v5.2c0 4.7-3 7.8-7 9.8-4-2-7-5.1-7-9.8V6l7-3Z" stroke="currentColor" strokeWidth="1.7"/><path d="m9 12 2 2 4-4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/></svg>; }
@@ -17,6 +18,18 @@ function ActivityTable({ entries, onDetails }) {
   })}</tbody></table>;
 }
 
+function ActivityHistoryTable({ entries, onDetails }) {
+  const timestampOptions = { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false };
+  return <div className="activity-table-wrap"><table className="data-table activity-table"><thead><tr><th>ID</th><th>User</th><th>Action</th><th>Document</th><th>Timestamp</th><th>Outcome</th><th>Details</th></tr></thead><tbody>{entries.map((entry) => {
+    const actor = entry.actor_email || (entry.user_id !== null && entry.user_id !== undefined ? `User #${entry.user_id}` : "System");
+    const document = entry.document_name || "N/A";
+    const outcome = entry.outcome || "N/A";
+    const outcomeLabel = { success: "Success", denied: "Denied", failure: "Failure" }[outcome] || outcome;
+    const action = entry.action === "login" ? `Login ${outcome === "success" ? "success" : outcome === "denied" || outcome === "failure" ? "failure" : ""}`.trim() : (entry.action || "N/A").replaceAll("_", " ");
+    return <tr key={entry.id}><td>#{entry.id}</td><td>{actor}<small>{entry.user_id !== null && entry.user_id !== undefined ? `ID ${entry.user_id}` : "System event"}</small></td><td><span className={`action-badge action-${entry.action || "unknown"}`}>{action}</span></td><td>{document}<small>{entry.document_id !== null && entry.document_id !== undefined ? `ID ${entry.document_id}` : "No document reference"}</small></td><td>{entry.timestamp ? new Date(entry.timestamp).toLocaleString(undefined, timestampOptions) : "N/A"}</td><td><span className={`result-badge result-${outcome}`}>{outcomeLabel}</span></td><td><button className="button button-quiet button-sm" onClick={() => onDetails(entry)}>Details</button></td></tr>;
+  })}</tbody></table></div>;
+}
+
 export default function App() {
   const [user, setUser] = useState(null), [authMode, setAuthMode] = useState("login");
   const [email, setEmail] = useState(""), [password, setPassword] = useState(""), [confirmPassword, setConfirmPassword] = useState("");
@@ -31,6 +44,9 @@ export default function App() {
   const [auditAction, setAuditAction] = useState(""), [auditResult, setAuditResult] = useState(""), [auditSearch, setAuditSearch] = useState(""), [selectedAudit, setSelectedAudit] = useState(null);
   const [appliedAuditFilters, setAppliedAuditFilters] = useState({ action: "", result: "", search: "" });
   const [auditExporting, setAuditExporting] = useState(false);
+  const [activityEntries, setActivityEntries] = useState(null), [activityPage, setActivityPage] = useState(1), [activityTotal, setActivityTotal] = useState(0), [activityExporting, setActivityExporting] = useState(false);
+  const [activityFilters, setActivityFilters] = useState({ user_search: "", action: "", document_search: "", outcome: "", start_at: "", end_at: "" });
+  const [appliedActivityFilters, setAppliedActivityFilters] = useState({ user_search: "", action: "", document_search: "", outcome: "", start_at: "", end_at: "" });
 
   const fetchUser = useCallback(async () => {
     try { const u = await apiRequest("/auth/me"); setUser(u); setDocuments(await apiRequest("/documents")); }
@@ -56,6 +72,44 @@ export default function App() {
   async function verifyAudit() {
     try { setAuditIntegrity(await apiRequest("/admin/audit/verify")); }
     catch (err) { setError(err.message); }
+  }
+  async function loadActivityPage(page = activityPage, filters = appliedActivityFilters) {
+    try {
+      const params = new URLSearchParams({ page: String(page), limit: "25" });
+      for (const [key, value] of Object.entries(filters)) if (value) params.set(key, value);
+      const data = await apiRequest(`/admin/activity?${params}`);
+      setActivityEntries(data.items); setActivityTotal(data.total); setActivityPage(data.page);
+      setAppliedActivityFilters(filters);
+    } catch (err) { setError(err.message); }
+  }
+  async function downloadActivity(format) {
+    if (activityExporting) return;
+    setActivityExporting(true);
+    setError("");
+    try {
+      const filters = { ...appliedActivityFilters };
+      const entries = await fetchAllMatchingActivity(apiRequest, filters);
+      if (entries.length === 0) {
+        setError("No activity records match the applied filters.");
+        return;
+      }
+      const generatedAt = new Date();
+      const content = buildActivityExport(format, entries, { filters, generatedAt });
+      const markdown = format === "md";
+      const blob = new Blob([content], { type: markdown ? "text/markdown;charset=utf-8" : "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = activityExportFilename(format, generatedAt);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (err) {
+      setError(`Activity export failed: ${err.message}`);
+    } finally {
+      setActivityExporting(false);
+    }
   }
   async function downloadAudit(format) {
     if (auditExporting) return;
@@ -134,7 +188,7 @@ export default function App() {
     try { await apiRequest(`/documents/${shareDocId}/share/${userId}`, { method: "DELETE" }); setShares((items) => items.filter((g) => g.user_id !== userId)); }
     catch (err) { setError(err.message); }
   }
-  function logout() { clearToken(); setUser(null); setDocuments([]); setSharedDocuments([]); setSharedDocsLoaded(false); setActiveTab("my-docs"); setPage("documents"); }
+  function logout() { clearToken(); setUser(null); setDocuments([]); setSharedDocuments([]); setSharedDocsLoaded(false); setActivityEntries(null); setActiveTab("my-docs"); setPage("documents"); }
   const list = activeTab === "my-docs" ? documents : sharedDocuments;
   const filtered = useMemo(() => list.filter((d) => d.filename.toLowerCase().includes(query.trim().toLowerCase())), [list, query]);
   const searchResults = useMemo(() => [...documents, ...sharedDocuments].filter((d) => d.filename.toLowerCase().includes(query.trim().toLowerCase())), [documents, sharedDocuments, query]);
@@ -159,6 +213,7 @@ export default function App() {
         <button type="button" className={`sidebar-link ${page === "documents" && activeTab === "shared-with-me" ? "active" : ""}`} aria-current={page === "documents" && activeTab === "shared-with-me" ? "page" : undefined} onClick={() => { setPage("documents"); setActiveTab("shared-with-me"); if (!sharedDocsLoaded) loadSharedDocs(); }}>Shared With Me</button>
         <button type="button" className={`sidebar-link ${page === "documents" && activeTab === "users" ? "active" : ""}`} aria-current={page === "documents" && activeTab === "users" ? "page" : undefined} onClick={async () => { setPage("documents"); setActiveTab("users"); try { setRegisteredUsers(await apiRequest("/admin/users")); } catch (err) { setError(err.message); } }}>Registered Users</button>
         {(user.role === "admin" || user.role === "auditor") && <button type="button" className={`sidebar-link ${page === "documents" && activeTab === "security" ? "active" : ""}`} aria-current={page === "documents" && activeTab === "security" ? "page" : undefined} onClick={() => { setPage("documents"); setActiveTab("security"); loadAuditPage(1); }}>Security &amp; Audit</button>}
+        {(user.role === "admin" || user.role === "auditor") && <button type="button" className={`sidebar-link ${page === "activity" ? "active" : ""}`} aria-current={page === "activity" ? "page" : undefined} onClick={() => { setPage("activity"); loadActivityPage(1); }}>Activity History</button>}
       </nav>
       <div className="sidebar-actions">
         <button type="button" className={`button button-secondary ${page === "search" ? "sidebar-action-active" : ""}`} onClick={() => { setPage("search"); if (!sharedDocsLoaded) loadSharedDocs(); }}>Search</button>
@@ -168,9 +223,19 @@ export default function App() {
     </aside>
     <div className="workspace-content">
     <main className="main-content">
-      <div className="page-heading"><div><span className="eyebrow">TRUSTVAULT WORKSPACE</span><h1>{page === "upload" ? "Upload a document" : page === "search" ? "Search documents" : activeTab === "shared-with-me" ? "Shared With Me" : activeTab === "users" ? "Registered Users" : activeTab === "security" ? "Security & Audit Center" : "My Documents"}</h1><p>Keep your important files organized and access controlled.</p></div>
+      <div className="page-heading"><div><span className="eyebrow">TRUSTVAULT WORKSPACE</span><h1>{page === "upload" ? "Upload a document" : page === "search" ? "Search documents" : page === "activity" ? "Activity History" : activeTab === "shared-with-me" ? "Shared With Me" : activeTab === "users" ? "Registered Users" : activeTab === "security" ? "Security & Audit Center" : "My Documents"}</h1><p>Keep your important files organized and access controlled.</p></div>
         {page === "documents" && <div className="heading-actions"><button className="button button-secondary" onClick={() => { setPage("search"); if (!sharedDocsLoaded) loadSharedDocs(); }}>Search documents</button><button className="button button-primary" onClick={() => { setUploadFile(null); setPage("upload"); }}>Upload a document</button></div>}</div>
       {error && <div className="alert alert-banner" role="alert">{error}<button className="text-button" onClick={() => setError("")}>Dismiss</button></div>}
+
+      {page === "activity" && (user.role === "admin" || user.role === "auditor") && <section className="panel activity-history"><div className="section-heading"><div><h2>System Activity</h2><p>Review recorded events across TrustVault.</p></div><span className="count">{activityTotal} events</span></div><div className="activity-filters">
+        <label className="field"><span>User email or ID</span><input value={activityFilters.user_search} onChange={(e) => setActivityFilters({ ...activityFilters, user_search: e.target.value })} placeholder="Search user" /></label>
+        <label className="field"><span>Action</span><select value={activityFilters.action} onChange={(e) => setActivityFilters({ ...activityFilters, action: e.target.value })}><option value="">All actions</option>{["login", "upload", "download", "read", "edit", "delete", "grant_access", "revoke_access", "share", "revoke"].map((action) => <option key={action} value={action}>{action.replaceAll("_", " ")}</option>)}</select></label>
+        <label className="field"><span>Document name or ID</span><input value={activityFilters.document_search} onChange={(e) => setActivityFilters({ ...activityFilters, document_search: e.target.value })} placeholder="Search document" /></label>
+        <label className="field"><span>Outcome</span><select value={activityFilters.outcome} onChange={(e) => setActivityFilters({ ...activityFilters, outcome: e.target.value })}><option value="">All outcomes</option><option value="success">Success</option><option value="denied">Denied</option><option value="failure">Failure</option></select></label>
+        <label className="field"><span>Start date and time</span><input type="datetime-local" value={activityFilters.start_at} onChange={(e) => setActivityFilters({ ...activityFilters, start_at: e.target.value })} /></label>
+        <label className="field"><span>End date and time</span><input type="datetime-local" value={activityFilters.end_at} onChange={(e) => setActivityFilters({ ...activityFilters, end_at: e.target.value })} /></label>
+        <div className="activity-filter-actions"><button className="button button-secondary" onClick={() => loadActivityPage(1, captureActivityFilters(activityFilters))}>Apply filters</button><button className="button button-quiet" onClick={() => { const cleared = { user_search: "", action: "", document_search: "", outcome: "", start_at: "", end_at: "" }; setActivityFilters(cleared); loadActivityPage(1, cleared); }}>Clear filters</button><button className="button button-quiet" disabled={!activityTotal || activityExporting} onClick={() => downloadActivity("txt")}>{activityExporting ? "Preparing export…" : "Export TXT"}</button><button className="button button-quiet" disabled={!activityTotal || activityExporting} onClick={() => downloadActivity("md")}>{activityExporting ? "Preparing export…" : "Export Markdown"}</button></div>
+      </div>{activityEntries === null ? <p className="activity-empty">Loading activity…</p> : activityEntries.length === 0 ? <div className="empty-state activity-empty"><h3>No activity records found</h3><p>Try clearing or changing the applied filters.</p></div> : <><ActivityHistoryTable entries={activityEntries} onDetails={setSelectedAudit} /><div className="audit-pagination"><span>{activityTotal} events · Page {activityPage} of {Math.max(1, Math.ceil(activityTotal / 25))}</span><div><button className="button button-secondary button-sm" disabled={activityPage <= 1} onClick={() => loadActivityPage(activityPage - 1)}>Previous</button><button className="button button-secondary button-sm" disabled={activityPage >= Math.ceil(activityTotal / 25)} onClick={() => loadActivityPage(activityPage + 1)}>Next</button></div></div></>}</section>}
 
       {page === "upload" && <section className="panel upload-panel"><h2>Add a document</h2><p className="panel-subtitle">Select a file to add it to your vault.</p><form onSubmit={handleUpload}>
         <label className="dropzone"><input className="file-input" type="file" accept=".pdf,.png,.jpg,.jpeg,.txt" onChange={(e) => setUploadFile(e.target.files?.[0] || null)} /><span className="upload-icon">↑</span><strong>{uploadFile ? uploadFile.name : "Choose a file to upload"}</strong><small>{uploadFile ? size(uploadFile.size) : "PDF, PNG, JPG or TXT · up to 5 MB"}</small><span className="button button-secondary">Browse files</span></label>
