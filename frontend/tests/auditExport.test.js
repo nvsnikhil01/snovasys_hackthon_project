@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   auditExportFilename,
   buildAuditExport,
+  captureAuditFilters,
   fetchAllMatchingAuditEntries,
 } from "../src/auditExport.js";
 
@@ -46,6 +47,24 @@ test("TXT export includes metadata and chronologically separated records", () =>
   assert.match(report, /Document: memo \| <draft>\.txt \(ID 12\)/);
 });
 
+test("TXT filter metadata replaces newline and control characters with spaces", () => {
+  const unsafeFilters = {
+    action: "edit\nScope: injected",
+    result: "allowed\r\nLast audit-chain verification: Failed",
+    search: "invoice\nEvent ID: 900\tInjected line",
+  };
+  const report = buildAuditExport("txt", [], {
+    filters: unsafeFilters,
+    auditIntegrity: null,
+    generatedAt: "2026-11-08T10:04:00Z",
+  });
+
+  assert.match(report, /Filters: action=edit Scope: injected; result=allowed Last audit-chain verification: Failed; search="invoice Event ID: 900 Injected line"/);
+  assert.equal((report.match(/^Scope:/gm) || []).length, 1);
+  assert.equal((report.match(/^Last audit-chain verification:/gm) || []).length, 1);
+  assert.doesNotMatch(report, /^Injected line$/m);
+});
+
 test("Markdown export escapes table characters, markup and newlines", () => {
   const report = buildAuditExport("md", entries.slice(0, 1), {
     filters,
@@ -80,6 +99,38 @@ test("pagination exports every matching page with the active filters", async () 
     assert.equal(params.get("result"), "allowed");
     assert.equal(params.get("search"), "A&B");
   }
+});
+
+test("changing selected filters does not mutate the applied export filters", async () => {
+  const selected = { action: "edit", result: "allowed", search: "before apply" };
+  const applied = captureAuditFilters(selected);
+  selected.action = "delete";
+  selected.result = "denied";
+  selected.search = "changed without applying";
+
+  const requested = [];
+  const apiRequest = async (path) => {
+    requested.push(path);
+    return {
+      page: 1,
+      total: 1,
+      pages: 1,
+      items: [entries[0]],
+    };
+  };
+  const result = await fetchAllMatchingAuditEntries(apiRequest, applied);
+  const report = buildAuditExport("md", result, {
+    filters: applied,
+    auditIntegrity: null,
+    generatedAt: "2026-11-08T10:04:00Z",
+  });
+
+  const params = new URLSearchParams(requested[0].split("?")[1]);
+  assert.equal(params.get("action"), "edit");
+  assert.equal(params.get("result"), "allowed");
+  assert.equal(params.get("search"), "before apply");
+  assert.match(report, /search="before apply"/);
+  assert.doesNotMatch(report, /changed without applying/);
 });
 
 test("empty filters return no records, while authorization errors propagate", async () => {

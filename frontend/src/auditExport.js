@@ -3,7 +3,7 @@ function safeText(value) {
   return Array.from(String(value), (character) => {
     const code = character.charCodeAt(0);
     return code < 32 || code === 127 ? " " : character;
-  }).join("").trim() || "Not provided";
+  }).join("").replace(/ {2,}/g, " ").trim() || "Not provided";
 }
 
 function escapeMarkdown(value) {
@@ -60,10 +60,18 @@ function documentLabel(event) {
 
 function filterLabel(filters) {
   return [
-    `action=${filters.action || "All"}`,
-    `result=${filters.result || "All"}`,
-    `search=${filters.search ? `"${filters.search}"` : "All"}`,
+    `action=${safeText(filters.action || "All")}`,
+    `result=${safeText(filters.result || "All")}`,
+    `search=${filters.search ? `"${safeText(filters.search)}"` : "All"}`,
   ].join("; ");
+}
+
+export function captureAuditFilters({ action, result, search }) {
+  return {
+    action: action || "",
+    result: result || "",
+    search: search.trim(),
+  };
 }
 
 function verificationLabel(auditIntegrity) {
