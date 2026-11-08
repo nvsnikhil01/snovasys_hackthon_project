@@ -858,6 +858,7 @@
 .audit-toolbar { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 15px }
 .audit-filter { min-height:39px; min-width:145px; padding:0 11px; border:1px solid var(--border-strong); border-radius:9px; background:#0b0f17; color:var(--text); font-size:11px }
 .audit-filter:first-child { flex:1 }
+.audit-export-note { flex-basis:100%; color:var(--muted); font-size:10px }
 .audit-table { min-width:850px }
 .audit-table th,.audit-table td { border-color:rgba(71,85,105,.45); color:var(--muted); background:transparent }
 .audit-table th { color:#cbd5e1; background:rgba(11,15,23,.35) }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiRequest, apiUrl, downloadFile, getToken, setToken, clearToken } from "./api";
+import { auditExportFilename, buildAuditExport, fetchAllMatchingAuditEntries } from "./auditExport";
 import "./App.css";
 
 function Shield() { return <svg className="shield" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3 19 6v5.2c0 4.7-3 7.8-7 9.8-4-2-7-5.1-7-9.8V6l7-3Z" stroke="currentColor" strokeWidth="1.7"/><path d="m9 12 2 2 4-4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/></svg>; }
@@ -28,6 +29,8 @@ export default function App() {
   const [registeredUsers, setRegisteredUsers] = useState(null), [auditEntries, setAuditEntries] = useState(null), [auditIntegrity, setAuditIntegrity] = useState(null);
   const [auditPage, setAuditPage] = useState(1), [auditTotal, setAuditTotal] = useState(0), [auditSummary, setAuditSummary] = useState({ total_events: 0, allowed_count: 0, denied_count: 0 });
   const [auditAction, setAuditAction] = useState(""), [auditResult, setAuditResult] = useState(""), [auditSearch, setAuditSearch] = useState(""), [selectedAudit, setSelectedAudit] = useState(null);
+  const [appliedAuditFilters, setAppliedAuditFilters] = useState({ action: "", result: "", search: "" });
+  const [auditExporting, setAuditExporting] = useState(false);
 
   const fetchUser = useCallback(async () => {
     try { const u = await apiRequest("/auth/me"); setUser(u); setDocuments(await apiRequest("/documents")); }
@@ -46,6 +49,7 @@ export default function App() {
       if (auditSearch.trim()) params.set("search", auditSearch.trim());
       const data = await apiRequest(`/admin/audit?${params}`);
       setAuditEntries(data.items); setAuditTotal(data.total); setAuditPage(data.page);
+      setAppliedAuditFilters({ action: auditAction, result: auditResult, search: auditSearch.trim() });
       setAuditSummary({ total_events: data.total_events, allowed_count: data.allowed_count, denied_count: data.denied_count });
     } catch (err) { setError(err.message); }
   }
@@ -53,15 +57,34 @@ export default function App() {
     try { setAuditIntegrity(await apiRequest("/admin/audit/verify")); }
     catch (err) { setError(err.message); }
   }
-  function downloadAudit(format) {
-    const markdown = format === "md";
-    const lines = auditEntries || [];
-    const content = markdown
-      ? ["# TrustVault Security & Audit Center", "", ...lines.flatMap((e) => [`## ${new Date(e.timestamp).toLocaleString()}`, `- Actor: ${e.actor_name || "System"}${e.actor_email ? ` (${e.actor_email})` : ""}`, `- Action: ${e.action}`, `- Document: ${e.document_name || "?"}${e.document_id ? ` (ID ${e.document_id})` : ""}`, `- Result: ${e.result}`, `- Event ID: ${e.id}`, `- Previous hash: ${e.prev_hash || "?"}`, `- Hash: ${e.hash || "?"}`, ""] )].join("\n")
-      : ["TrustVault Security & Audit Center", "", ...lines.map((e) => `${new Date(e.timestamp).toISOString()} | ${e.actor_name || "System"} | ${e.action} | ${e.document_name || "?"} (#${e.document_id ?? "?"}) | ${e.result} | hash=${e.hash || "?"}`)].join("\n");
-    const blob = new Blob([content], { type: markdown ? "text/markdown" : "text/plain" });
-    const url = URL.createObjectURL(blob); const link = document.createElement("a");
-    link.href = url; link.download = `trustvault-audit-page-${auditPage}.${format}`; link.click(); URL.revokeObjectURL(url);
+  async function downloadAudit(format) {
+    if (auditExporting) return;
+    setAuditExporting(true);
+    setError("");
+    try {
+      const filters = { ...appliedAuditFilters };
+      const entries = await fetchAllMatchingAuditEntries(apiRequest, filters);
+      if (entries.length === 0) {
+        setError("No audit records match the applied filters.");
+        return;
+      }
+      const generatedAt = new Date();
+      const content = buildAuditExport(format, entries, { filters, auditIntegrity, generatedAt });
+      const markdown = format === "md";
+      const blob = new Blob([content], { type: markdown ? "text/markdown;charset=utf-8" : "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = auditExportFilename(format, generatedAt);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (err) {
+      setError(`Audit export failed: ${err.message}`);
+    } finally {
+      setAuditExporting(false);
+    }
   }
   async function loadDocs() { try { setDocuments(await apiRequest("/documents")); } catch (err) { setError(err.message); } }
   async function loadSharedDocs() { try { setSharedDocuments(await apiRequest("/documents/shared-with-me")); setSharedDocsLoaded(true); } catch (err) { setError(err.message); } }
@@ -143,7 +166,7 @@ export default function App() {
 
       {page === "documents" && <section className="documents-panel" id="document-list-panel"><div className="section-heading"><div><h2>Documents</h2><p>Manage your files and shared access.</p></div><span className="count">{list.length} files</span></div>
           <div className="tabs" role="tablist" aria-label="Dashboard sections"><button role="tab" aria-selected={activeTab === "my-docs"} className={activeTab === "my-docs" ? "tab active" : "tab"} onClick={() => setActiveTab("my-docs")}>My documents <span>{documents.length}</span></button><button role="tab" aria-selected={activeTab === "shared-with-me"} className={activeTab === "shared-with-me" ? "tab active" : "tab"} onClick={() => { setActiveTab("shared-with-me"); if (!sharedDocsLoaded) loadSharedDocs(); }}>Shared with me <span>{sharedDocuments.length}</span></button>{(user.role === "admin" || user.role === "auditor") && <button role="tab" aria-selected={activeTab === "security"} className={activeTab === "security" ? "tab active" : "tab"} onClick={() => { setActiveTab("security"); loadAuditPage(1); }}>Security &amp; Audit Center</button>}<button role="tab" aria-selected={activeTab === "users"} className={activeTab === "users" ? "tab active" : "tab"} onClick={async () => { setActiveTab("users"); try { setRegisteredUsers(await apiRequest("/admin/users")); } catch (err) { setError(err.message); } }}>Registered users</button></div>
-          {activeTab === "security" ? <section className="security-center"><div className="audit-summary"><article><span>Total Audit Events</span><b>{auditSummary.total_events}</b></article><article><span>Successful Events</span><b>{auditSummary.allowed_count}</b></article><article><span>Denied Events</span><b>{auditSummary.denied_count}</b></article></div><section className="audit-integrity"><div><span className="eyebrow">AUDIT INTEGRITY</span><h3>{auditIntegrity ? (auditIntegrity.ok ? "Valid" : "Tampered") : "Not verified yet"}</h3><p>Last verification: {auditIntegrity?.verified_at ? new Date(auditIntegrity.verified_at).toLocaleString() : "\u2014"} \u00b7 Events checked: {auditIntegrity?.events_checked ?? "\u2014"}</p></div><button className="button button-primary" onClick={verifyAudit}>Verify Audit Integrity</button></section><div className="audit-toolbar"><input className="audit-filter" value={auditSearch} onChange={(e) => setAuditSearch(e.target.value)} onKeyDown={(e) => e.key === "Enter" && loadAuditPage(1)} placeholder="Search actor or document" aria-label="Search actor or document"/><select className="audit-filter" value={auditAction} onChange={(e) => { setAuditAction(e.target.value); }} aria-label="Filter by action"><option value="">All actions</option>{["login","upload","download","read","edit","delete","grant_access","revoke_access"].map((a) => <option key={a} value={a}>{a.replaceAll("_", " ")}</option>)}</select><select className="audit-filter" value={auditResult} onChange={(e) => setAuditResult(e.target.value)} aria-label="Filter by result"><option value="">All results</option><option value="allowed">Allowed</option><option value="denied">Denied</option></select><button className="button button-secondary" onClick={() => loadAuditPage(1)}>Apply filters</button><button className="button button-quiet" onClick={() => downloadAudit("txt")}>Download Logs (.txt)</button><button className="button button-quiet" onClick={() => downloadAudit("md")}>Download Logs (.md)</button></div>{auditEntries && <><ActivityTable entries={auditEntries} onDetails={setSelectedAudit}/><div className="audit-pagination"><span>{auditTotal} events \u00b7 Page {auditPage} of {Math.max(1, Math.ceil(auditTotal / 20))}</span><div><button className="button button-secondary button-sm" disabled={auditPage <= 1} onClick={() => loadAuditPage(auditPage - 1)}>Previous</button><button className="button button-secondary button-sm" disabled={auditPage >= Math.ceil(auditTotal / 20)} onClick={() => loadAuditPage(auditPage + 1)}>Next</button></div></div></>}</section> : activeTab === "users" ? <table className="data-table"><thead><tr><th>ID</th><th>Email</th><th>Role</th><th>Created At</th></tr></thead><tbody>{registeredUsers?.map((u) => <tr key={u.id}><td>{u.id}</td><td>{u.email}</td><td>{u.role}</td><td>{u.created_at || "—"}</td></tr>)}</tbody></table> : filtered.length === 0 ? <div className="empty-state"><span className="empty-icon">{query ? "⌕" : activeTab === "my-docs" ? "▤" : "⇆"}</span><h3>{query ? "No matching documents" : activeTab === "my-docs" ? "Your vault is ready" : "Nothing has been shared with you"}</h3><p>{query ? "Try searching for another filename." : activeTab === "my-docs" ? "You have not uploaded any documents yet." : "Documents shared with you will appear here."}</p>{activeTab === "my-docs" && !query && <button className="button button-primary" onClick={() => setPage("upload")}>＋ Upload your first document</button>}</div> :
+          {activeTab === "security" ? <section className="security-center"><div className="audit-summary"><article><span>Total Audit Events</span><b>{auditSummary.total_events}</b></article><article><span>Successful Events</span><b>{auditSummary.allowed_count}</b></article><article><span>Denied Events</span><b>{auditSummary.denied_count}</b></article></div><section className="audit-integrity"><div><span className="eyebrow">AUDIT INTEGRITY</span><h3>{auditIntegrity ? (auditIntegrity.ok ? "Valid" : "Tampered") : "Not verified yet"}</h3><p>Last verification: {auditIntegrity?.verified_at ? new Date(auditIntegrity.verified_at).toLocaleString() : "\u2014"} \u00b7 Events checked: {auditIntegrity?.events_checked ?? "\u2014"}</p></div><button className="button button-primary" onClick={verifyAudit}>Verify Audit Integrity</button></section><div className="audit-toolbar"><input className="audit-filter" value={auditSearch} onChange={(e) => setAuditSearch(e.target.value)} onKeyDown={(e) => e.key === "Enter" && loadAuditPage(1)} placeholder="Search actor or document" aria-label="Search actor or document"/><select className="audit-filter" value={auditAction} onChange={(e) => { setAuditAction(e.target.value); }} aria-label="Filter by action"><option value="">All actions</option>{["login","upload","download","read","edit","delete","grant_access","revoke_access"].map((a) => <option key={a} value={a}>{a.replaceAll("_", " ")}</option>)}</select><select className="audit-filter" value={auditResult} onChange={(e) => setAuditResult(e.target.value)} aria-label="Filter by result"><option value="">All results</option><option value="allowed">Allowed</option><option value="denied">Denied</option></select><button className="button button-secondary" onClick={() => loadAuditPage(1)}>Apply filters</button><button className="button button-quiet" disabled={!auditEntries?.length || auditTotal === 0 || auditExporting} onClick={() => downloadAudit("txt")}>{auditExporting ? "Preparing export…" : "Export TXT"}</button><button className="button button-quiet" disabled={!auditEntries?.length || auditTotal === 0 || auditExporting} onClick={() => downloadAudit("md")}>{auditExporting ? "Preparing export…" : "Export Markdown"}</button><span className="audit-export-note">Exports include all {auditTotal} records matching the applied filters.</span></div>{auditEntries && <><ActivityTable entries={auditEntries} onDetails={setSelectedAudit}/><div className="audit-pagination"><span>{auditTotal} events \u00b7 Page {auditPage} of {Math.max(1, Math.ceil(auditTotal / 20))}</span><div><button className="button button-secondary button-sm" disabled={auditPage <= 1} onClick={() => loadAuditPage(auditPage - 1)}>Previous</button><button className="button button-secondary button-sm" disabled={auditPage >= Math.ceil(auditTotal / 20)} onClick={() => loadAuditPage(auditPage + 1)}>Next</button></div></div></>}</section> : activeTab === "users" ? <table className="data-table"><thead><tr><th>ID</th><th>Email</th><th>Role</th><th>Created At</th></tr></thead><tbody>{registeredUsers?.map((u) => <tr key={u.id}><td>{u.id}</td><td>{u.email}</td><td>{u.role}</td><td>{u.created_at || "—"}</td></tr>)}</tbody></table> : filtered.length === 0 ? <div className="empty-state"><span className="empty-icon">{query ? "⌕" : activeTab === "my-docs" ? "▤" : "⇆"}</span><h3>{query ? "No matching documents" : activeTab === "my-docs" ? "Your vault is ready" : "Nothing has been shared with you"}</h3><p>{query ? "Try searching for another filename." : activeTab === "my-docs" ? "You have not uploaded any documents yet." : "Documents shared with you will appear here."}</p>{activeTab === "my-docs" && !query && <button className="button button-primary" onClick={() => setPage("upload")}>＋ Upload your first document</button>}</div> :
             <div className="document-list">{filtered.map((doc) => <article className="document-row" key={doc.id}><div className="document-details"><span className="file-mark">FILE</span><div><h3 title={doc.filename}>{doc.filename}</h3><p>{size(doc.size)} <i>·</i> Added {date(doc.created_at)}</p></div></div><div className="document-actions"><button className="button button-secondary button-sm" onClick={() => handleDownload(doc)}>↓ Download</button>{activeTab === "my-docs" && doc.owner_id === user.id && <><button className="button button-outline button-sm" onClick={() => setShareDocId(doc.id)}>Share</button><button className="button button-danger button-sm" onClick={() => handleDelete(doc.id)}>Delete</button></>}</div></article>)}</div>}
         </section>}
     </main>
