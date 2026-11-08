@@ -98,7 +98,9 @@ def update_document(
     current_user: User = Depends(get_current_user),
 ):
     """Allows owner or user with 'edit' permission to replace document content."""
-    document = authorize(db, current_user, db.get(Document, doc_id), "edit")
+    document = authorize(
+        db, current_user, db.get(Document, doc_id), "edit", log_allowed=False
+    )
     filename, data = validate_and_read_file(file)
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -106,14 +108,22 @@ def update_document(
 
     old_path = (UPLOAD_DIR / document.stored_path).resolve()
     new_stored_name = uuid.uuid4().hex + ".bin"
-    (UPLOAD_DIR / new_stored_name).write_bytes(data)
+    new_path = UPLOAD_DIR / new_stored_name
+    new_path.write_bytes(data)
 
     document.filename = filename
     document.stored_path = new_stored_name
     document.size = len(data)
     document.file_data = data
     document.content = data
-    db.commit()
+    try:
+        # Commit the document update and its success event in the same
+        # transaction so neither can persist without the other.
+        log_event(db, current_user.id, "edit", document.id, "allowed")
+    except Exception:
+        db.rollback()
+        new_path.unlink(missing_ok=True)
+        raise
     db.refresh(document)
 
     if old_path.is_relative_to(upload_root) and old_path.is_file():

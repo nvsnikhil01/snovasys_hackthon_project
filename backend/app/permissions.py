@@ -39,13 +39,18 @@ def can(db: Session, user: User, document: Document, action: str) -> bool:
     return level in ALLOWED.get(action, set())
 
 
-def authorize(db: Session, user: User, document, action: str):
-    """What routes call. Decides, logs the attempt either way, and answers 404 if denied."""
+def authorize(db: Session, user: User, document, action: str, log_allowed: bool = True):
+    """Decide access, log attempts, and answer 404 if denied.
+
+    Routes that log success only after an operation commits can pass
+    ``log_allowed=False``; denied attempts are still logged here.
+    """
     if document is None:
         log_event(db, user.id, action, None, "denied")
         raise HTTPException(status_code=404, detail="Not found")
     allowed = can(db, user, document, action)
-    log_event(db, user.id, action, document.id, "allowed" if allowed else "denied")
+    if not allowed or log_allowed:
+        log_event(db, user.id, action, document.id, "allowed" if allowed else "denied")
     if not allowed:
         raise HTTPException(status_code=404, detail="Not found")
     return document

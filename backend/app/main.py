@@ -18,11 +18,8 @@ if "documents" in inspect(engine).get_table_names():
             connection.exec_driver_sql(f"ALTER TABLE documents ADD COLUMN content {binary_type}")
     if "file_data" not in document_columns:
         binary_type = "BYTEA" if engine.dialect.name == "postgresql" else "BLOB"
-        try:
-            with engine.begin() as connection:
-                connection.exec_driver_sql(f"ALTER TABLE documents ADD COLUMN file_data {binary_type}")
-        except Exception:
-            pass
+        with engine.begin() as connection:
+            connection.exec_driver_sql(f"ALTER TABLE documents ADD COLUMN file_data {binary_type}")
 
 app = FastAPI(title="TrustVault API")
 
