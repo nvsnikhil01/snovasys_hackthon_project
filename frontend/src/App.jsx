@@ -150,11 +150,25 @@ export default function App() {
     <p className="auth-switch">{authMode === "login" ? "New to TrustVault?" : "Already have an account?"} <button className="text-button" onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setError(""); }}>{authMode === "login" ? "Create an account" : "I already have an account"}</button></p>
   </section></main>;
 
-  return <div className="app-shell">
-    <header className="topbar"><a className="brand" href="#" onClick={(e) => { e.preventDefault(); setPage("documents"); }}><span className="brand-icon"><Shield /></span><span>Trust<span className="gold">Vault</span></span></a>
-      <div className="account"><span className="avatar">{user.email?.[0]?.toUpperCase()}</span><span className="account-email">Welcome, {user.email}!</span><span className="role-badge">Your Role: {user.role}</span><button className="button button-quiet" onClick={logout}>Log out</button></div></header>
+  return <div className="app-shell workspace-layout">
+    <aside className="sidebar">
+      <a className="brand" href="#" onClick={(e) => { e.preventDefault(); setPage("documents"); setActiveTab("my-docs"); }}><span className="brand-icon"><Shield /></span><span>Trust<span className="gold">Vault</span></span></a>
+      <nav className="sidebar-nav" aria-label="Workspace navigation">
+        <span className="sidebar-label">WORKSPACE</span>
+        <button type="button" className={`sidebar-link ${page === "documents" && activeTab === "my-docs" ? "active" : ""}`} aria-current={page === "documents" && activeTab === "my-docs" ? "page" : undefined} onClick={() => { setPage("documents"); setActiveTab("my-docs"); }}>My Documents</button>
+        <button type="button" className={`sidebar-link ${page === "documents" && activeTab === "shared-with-me" ? "active" : ""}`} aria-current={page === "documents" && activeTab === "shared-with-me" ? "page" : undefined} onClick={() => { setPage("documents"); setActiveTab("shared-with-me"); if (!sharedDocsLoaded) loadSharedDocs(); }}>Shared With Me</button>
+        <button type="button" className={`sidebar-link ${page === "documents" && activeTab === "users" ? "active" : ""}`} aria-current={page === "documents" && activeTab === "users" ? "page" : undefined} onClick={async () => { setPage("documents"); setActiveTab("users"); try { setRegisteredUsers(await apiRequest("/admin/users")); } catch (err) { setError(err.message); } }}>Registered Users</button>
+        {(user.role === "admin" || user.role === "auditor") && <button type="button" className={`sidebar-link ${page === "documents" && activeTab === "security" ? "active" : ""}`} aria-current={page === "documents" && activeTab === "security" ? "page" : undefined} onClick={() => { setPage("documents"); setActiveTab("security"); loadAuditPage(1); }}>Security &amp; Audit</button>}
+      </nav>
+      <div className="sidebar-actions">
+        <button type="button" className={`button button-secondary ${page === "search" ? "sidebar-action-active" : ""}`} onClick={() => { setPage("search"); if (!sharedDocsLoaded) loadSharedDocs(); }}>Search</button>
+        <button type="button" className={`button button-primary ${page === "upload" ? "sidebar-action-active" : ""}`} onClick={() => { setUploadFile(null); setPage("upload"); }}>Upload</button>
+      </div>
+      <div className="sidebar-account"><span className="avatar">{user.email?.[0]?.toUpperCase()}</span><div className="sidebar-identity"><b>{user.email}</b><span>{user.role}</span></div><button type="button" className="button button-quiet button-sm" onClick={logout}>Log out</button></div>
+    </aside>
+    <div className="workspace-content">
     <main className="main-content">
-      <div className="page-heading"><div><span className="eyebrow">SECURE FILE SPACE</span><h1>{page === "upload" ? "Upload a document" : page === "search" ? "Search documents" : "Your documents"}</h1><p>Keep your important files organized and access controlled.</p></div>
+      <div className="page-heading"><div><span className="eyebrow">TRUSTVAULT WORKSPACE</span><h1>{page === "upload" ? "Upload a document" : page === "search" ? "Search documents" : activeTab === "shared-with-me" ? "Shared With Me" : activeTab === "users" ? "Registered Users" : activeTab === "security" ? "Security & Audit Center" : "My Documents"}</h1><p>Keep your important files organized and access controlled.</p></div>
         {page === "documents" && <div className="heading-actions"><button className="button button-secondary" onClick={() => { setPage("search"); if (!sharedDocsLoaded) loadSharedDocs(); }}>Search documents</button><button className="button button-primary" onClick={() => { setUploadFile(null); setPage("upload"); }}>Upload a document</button></div>}</div>
       {error && <div className="alert alert-banner" role="alert">{error}<button className="text-button" onClick={() => setError("")}>Dismiss</button></div>}
 
@@ -171,6 +185,7 @@ export default function App() {
         </section>}
     </main>
     <footer className="footer"><span><Shield /> TrustVault</span><span>Private by design</span></footer>
+    </div>
 
     {selectedAudit && <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setSelectedAudit(null); }}><aside className="audit-drawer" role="dialog" aria-modal="true" aria-label="Audit event details"><div className="section-heading"><h2>Audit Event #{selectedAudit.id}</h2><button className="close-button" onClick={() => setSelectedAudit(null)}>\u00d7</button></div><p>Hash chain links</p><pre>{JSON.stringify({ previous_hash: selectedAudit.prev_hash, hash: selectedAudit.hash }, null, 2)}</pre><p>Event metadata</p><pre>{JSON.stringify(selectedAudit, null, 2)}</pre></aside></div>}
     {shareDocId && <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setShareDocId(null); }}><section className="share-modal" role="dialog" aria-modal="true" aria-labelledby="share-title"><div className="modal-heading"><div><span className="eyebrow">DOCUMENT ACCESS</span><h2 id="share-title">Share document</h2><p>Choose who can access this file.</p></div><button className="close-button" aria-label="Close" onClick={() => setShareDocId(null)}>×</button></div>
