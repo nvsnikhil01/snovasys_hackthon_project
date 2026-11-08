@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiRequest, apiUrl, downloadFile, getToken, setToken, clearToken } from "./api";
 import { auditExportFilename, buildAuditExport, captureAuditFilters, fetchAllMatchingAuditEntries } from "./auditExport";
-import { activityExportFilename, buildActivityExport, captureActivityFilters, fetchAllMatchingActivity } from "./activityHistory";
+import { activityExportFilename, activityHistoryEndpoint, buildActivityExport, captureActivityFilters, fetchAllMatchingActivity } from "./activityHistory";
 import "./App.css";
 
 function Shield() { return <svg className="shield" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3 19 6v5.2c0 4.7-3 7.8-7 9.8-4-2-7-5.1-7-9.8V6l7-3Z" stroke="currentColor" strokeWidth="1.7"/><path d="m9 12 2 2 4-4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/></svg>; }
@@ -47,6 +47,7 @@ export default function App() {
   const [activityEntries, setActivityEntries] = useState(null), [activityPage, setActivityPage] = useState(1), [activityTotal, setActivityTotal] = useState(0), [activityExporting, setActivityExporting] = useState(false);
   const [activityFilters, setActivityFilters] = useState({ user_search: "", action: "", document_search: "", outcome: "", start_at: "", end_at: "" });
   const [appliedActivityFilters, setAppliedActivityFilters] = useState({ user_search: "", action: "", document_search: "", outcome: "", start_at: "", end_at: "" });
+  const activityEndpoint = activityHistoryEndpoint(user?.role);
 
   const fetchUser = useCallback(async () => {
     try { const u = await apiRequest("/auth/me"); setUser(u); setDocuments(await apiRequest("/documents")); }
@@ -75,11 +76,12 @@ export default function App() {
   }
   async function loadActivityPage(page = activityPage, filters = appliedActivityFilters) {
     try {
+      const requestFilters = activityEndpoint === "/auth/activity" ? { ...filters, user_search: "" } : filters;
       const params = new URLSearchParams({ page: String(page), limit: "25" });
-      for (const [key, value] of Object.entries(filters)) if (value) params.set(key, value);
-      const data = await apiRequest(`/admin/activity?${params}`);
+      for (const [key, value] of Object.entries(requestFilters)) if (value) params.set(key, value);
+      const data = await apiRequest(`${activityEndpoint}?${params}`);
       setActivityEntries(data.items); setActivityTotal(data.total); setActivityPage(data.page);
-      setAppliedActivityFilters(filters);
+      setAppliedActivityFilters(requestFilters);
     } catch (err) { setError(err.message); }
   }
   async function downloadActivity(format) {
@@ -87,8 +89,10 @@ export default function App() {
     setActivityExporting(true);
     setError("");
     try {
-      const filters = { ...appliedActivityFilters };
-      const entries = await fetchAllMatchingActivity(apiRequest, filters);
+      const filters = activityEndpoint === "/auth/activity"
+        ? { ...appliedActivityFilters, user_search: "" }
+        : { ...appliedActivityFilters };
+      const entries = await fetchAllMatchingActivity(apiRequest, filters, 100, activityEndpoint);
       if (entries.length === 0) {
         setError("No activity records match the applied filters.");
         return;
@@ -213,7 +217,7 @@ export default function App() {
         <button type="button" className={`sidebar-link ${page === "documents" && activeTab === "shared-with-me" ? "active" : ""}`} aria-current={page === "documents" && activeTab === "shared-with-me" ? "page" : undefined} onClick={() => { setPage("documents"); setActiveTab("shared-with-me"); if (!sharedDocsLoaded) loadSharedDocs(); }}>Shared With Me</button>
         <button type="button" className={`sidebar-link ${page === "documents" && activeTab === "users" ? "active" : ""}`} aria-current={page === "documents" && activeTab === "users" ? "page" : undefined} onClick={async () => { setPage("documents"); setActiveTab("users"); try { setRegisteredUsers(await apiRequest("/admin/users")); } catch (err) { setError(err.message); } }}>Registered Users</button>
         {(user.role === "admin" || user.role === "auditor") && <button type="button" className={`sidebar-link ${page === "documents" && activeTab === "security" ? "active" : ""}`} aria-current={page === "documents" && activeTab === "security" ? "page" : undefined} onClick={() => { setPage("documents"); setActiveTab("security"); loadAuditPage(1); }}>Security &amp; Audit</button>}
-        {(user.role === "admin" || user.role === "auditor") && <button type="button" className={`sidebar-link ${page === "activity" ? "active" : ""}`} aria-current={page === "activity" ? "page" : undefined} onClick={() => { setPage("activity"); loadActivityPage(1); }}>Activity History</button>}
+        <button type="button" className={`sidebar-link ${page === "activity" ? "active" : ""}`} aria-current={page === "activity" ? "page" : undefined} onClick={() => { setPage("activity"); loadActivityPage(1); }}>Activity History</button>
       </nav>
       <div className="sidebar-actions">
         <button type="button" className={`button button-secondary ${page === "search" ? "sidebar-action-active" : ""}`} onClick={() => { setPage("search"); if (!sharedDocsLoaded) loadSharedDocs(); }}>Search</button>
@@ -227,8 +231,8 @@ export default function App() {
         {page === "documents" && <div className="heading-actions"><button className="button button-secondary" onClick={() => { setPage("search"); if (!sharedDocsLoaded) loadSharedDocs(); }}>Search documents</button><button className="button button-primary" onClick={() => { setUploadFile(null); setPage("upload"); }}>Upload a document</button></div>}</div>
       {error && <div className="alert alert-banner" role="alert">{error}<button className="text-button" onClick={() => setError("")}>Dismiss</button></div>}
 
-      {page === "activity" && (user.role === "admin" || user.role === "auditor") && <section className="panel activity-history"><div className="section-heading"><div><h2>System Activity</h2><p>Review recorded events across TrustVault.</p></div><span className="count">{activityTotal} events</span></div><div className="activity-filters">
-        <label className="field"><span>User email or ID</span><input value={activityFilters.user_search} onChange={(e) => setActivityFilters({ ...activityFilters, user_search: e.target.value })} placeholder="Search user" /></label>
+      {page === "activity" && <section className="panel activity-history"><div className="section-heading"><div><h2>{user.role === "admin" || user.role === "auditor" ? "System Activity" : "My Activity"}</h2><p>{user.role === "admin" || user.role === "auditor" ? "Review recorded events across TrustVault." : "Review activity recorded for your account."}</p></div><span className="count">{activityTotal} events</span></div><div className="activity-filters">
+        {(user.role === "admin" || user.role === "auditor") && <label className="field"><span>User email or ID</span><input value={activityFilters.user_search} onChange={(e) => setActivityFilters({ ...activityFilters, user_search: e.target.value })} placeholder="Search user" /></label>}
         <label className="field"><span>Action</span><select value={activityFilters.action} onChange={(e) => setActivityFilters({ ...activityFilters, action: e.target.value })}><option value="">All actions</option>{["login", "upload", "download", "read", "edit", "delete", "grant_access", "revoke_access", "share", "revoke"].map((action) => <option key={action} value={action}>{action.replaceAll("_", " ")}</option>)}</select></label>
         <label className="field"><span>Document name or ID</span><input value={activityFilters.document_search} onChange={(e) => setActivityFilters({ ...activityFilters, document_search: e.target.value })} placeholder="Search document" /></label>
         <label className="field"><span>Outcome</span><select value={activityFilters.outcome} onChange={(e) => setActivityFilters({ ...activityFilters, outcome: e.target.value })}><option value="">All outcomes</option><option value="success">Success</option><option value="denied">Denied</option><option value="failure">Failure</option></select></label>

@@ -43,13 +43,17 @@ export function captureActivityFilters(filters) {
   };
 }
 
-export async function fetchAllMatchingActivity(apiRequest, filters, limit = 100) {
+export function activityHistoryEndpoint(role) {
+  return role === "admin" || role === "auditor" ? "/admin/activity" : "/auth/activity";
+}
+
+export async function fetchAllMatchingActivity(apiRequest, filters, limit = 100, endpoint = "/admin/activity") {
   const requestPage = async (page) => {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     for (const [key, value] of Object.entries(filters)) {
       if (value) params.set(key, value);
     }
-    return apiRequest(`/admin/activity?${params}`);
+    return apiRequest(`${endpoint}?${params}`);
   };
 
   const firstPage = await requestPage(1);

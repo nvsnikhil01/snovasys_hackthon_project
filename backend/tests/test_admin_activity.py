@@ -95,6 +95,88 @@ def test_activity_requires_admin_or_auditor(client):
     assert client.get("/admin/activity", headers=auditor).status_code == 200
 
 
+def test_normal_user_activity_is_personal_and_cannot_be_widened_by_query_parameters(client):
+    personal_headers = login(client, "personal@example.com")
+    personal_user_id = client.get("/auth/me", headers=personal_headers).json()["id"]
+    db = db_session()
+    try:
+        _, other_user_id, _, _ = add_activity_fixtures(db, client)
+        own_event = log_event(db, personal_user_id, "edit", None, "allowed")
+        own_event_id = own_event.id
+    finally:
+        db.close()
+
+    response = client.get(
+        "/auth/activity",
+        params={"page": 1, "limit": 100, "user_search": "other@example.com", "user_id": other_user_id},
+        headers=personal_headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 2  # registration/login and this test's own event
+    assert {item["user_id"] for item in payload["items"]} == {personal_user_id}
+    assert own_event_id in {item["id"] for item in payload["items"]}
+    assert other_user_id not in {item["user_id"] for item in payload["items"]}
+    other_document_search = client.get(
+        "/auth/activity",
+        params={"page": 1, "limit": 100, "document_search": "Notes"},
+        headers=personal_headers,
+    ).json()
+    assert other_document_search["items"] == []
+    assert other_document_search["total"] == 0
+    assert client.get("/admin/activity", headers=personal_headers).status_code == 403
+
+
+def test_personal_activity_filters_and_paginates_with_stable_order(client):
+    headers = login(client, "personal@example.com")
+    user_id = client.get("/auth/me", headers=headers).json()["id"]
+    db = db_session()
+    try:
+        document = Document(
+            owner_id=user_id,
+            filename="Personal Notes.txt",
+            stored_path="unused.bin",
+            size=4,
+        )
+        db.add(document)
+        db.flush()
+        first = log_event(db, user_id, "upload", document.id, "allowed")
+        second = log_event(db, user_id, "edit", document.id, "allowed")
+        first_id = first.id
+        second_id = second.id
+        log_event(db, user_id, "download", document.id, "denied")
+        event_time = db.scalar(select(AuditLog.timestamp).where(AuditLog.id == second_id))
+        if event_time.tzinfo is None:
+            event_time = event_time.replace(tzinfo=timezone.utc)
+    finally:
+        db.close()
+
+    filtered = client.get(
+        "/auth/activity",
+        params={
+            "page": 1,
+            "limit": 10,
+            "action": "edit",
+            "document_search": "Personal Notes",
+            "outcome": "success",
+            "start_at": (event_time - timedelta(seconds=1)).isoformat(),
+            "end_at": (event_time + timedelta(seconds=1)).isoformat(),
+        },
+        headers=headers,
+    )
+    assert filtered.status_code == 200
+    payload = filtered.json()
+    assert payload["total"] == 1
+    assert [item["id"] for item in payload["items"]] == [second_id]
+    assert payload["items"][0]["document_name"] == "Personal Notes.txt"
+
+    first_page = client.get("/auth/activity?page=1&limit=2", headers=headers).json()
+    second_page = client.get("/auth/activity?page=2&limit=2", headers=headers).json()
+    assert first_page["items"][0]["id"] > first_page["items"][1]["id"]
+    assert first_page["items"][1]["id"] > second_page["items"][0]["id"]
+    assert first_id in [item["id"] for item in first_page["items"] + second_page["items"]]
+
+
 @pytest.mark.parametrize("role", ["admin", "auditor"])
 def test_activity_records_are_existing_unique_rows_and_join_available_fields(client, role):
     headers = login(client, f"{role}@example.com", role=role)

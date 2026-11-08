@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  activityHistoryEndpoint,
   activityExportFilename,
   buildActivityExport,
   captureActivityFilters,
@@ -27,6 +28,32 @@ test("captureActivityFilters trims text and turns local datetime inputs into tim
   assert.equal(applied.user_search, "actor@example.com");
   assert.match(applied.start_at, /Z$/);
   assert.equal(applied.action, "edit");
+});
+
+test("activity requests and exports use the endpoint assigned to each role", async () => {
+  assert.equal(activityHistoryEndpoint("user"), "/auth/activity");
+  assert.equal(activityHistoryEndpoint("admin"), "/admin/activity");
+  assert.equal(activityHistoryEndpoint("auditor"), "/admin/activity");
+
+  const paths = [];
+  const apiRequest = async (path) => {
+    paths.push(path);
+    return { items: [{ ...entries[0], user_id: 3 }], total: 1, pages: 1 };
+  };
+  const exported = await fetchAllMatchingActivity(apiRequest, filters, 100, activityHistoryEndpoint("user"));
+  assert.equal(exported.length, 1);
+  assert.ok(paths[0].startsWith("/auth/activity?"));
+  assert.equal(new URL(paths[0], "http://localhost").searchParams.get("action"), "edit");
+  const txt = buildActivityExport("txt", exported, { filters, generatedAt: "2026-06-01T10:00:00Z" });
+  const markdown = buildActivityExport("md", exported, { filters, generatedAt: "2026-06-01T10:00:00Z" });
+  assert.match(txt, /actor@example\.com/);
+  assert.match(markdown, /actor@example\\\.com/);
+  assert.doesNotMatch(txt, /other@example\.com/);
+  assert.doesNotMatch(markdown, /other@example\.com/);
+
+  paths.length = 0;
+  await fetchAllMatchingActivity(apiRequest, filters, 100, activityHistoryEndpoint("auditor"));
+  assert.ok(paths[0].startsWith("/admin/activity?"));
 });
 
 test("activity export fetches every matching page with the same filters and no duplicate records", async () => {
