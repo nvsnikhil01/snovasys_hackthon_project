@@ -55,11 +55,15 @@ def log_event(db: Session, user_id, action: str, document_id, result: str) -> Au
 
 def verify_chain(db: Session) -> dict:
     prev = GENESIS
+    checked = 0
     for entry in db.scalars(select(AuditLog).order_by(AuditLog.id)):
+        checked += 1
         expected = _compute_hash(
             prev, entry.timestamp, entry.user_id, entry.action, entry.document_id, entry.result
         )
         if entry.prev_hash != prev or not hmac.compare_digest(entry.hash, expected):
-            return {"ok": False, "first_bad_id": entry.id}
+            return {"ok": False, "first_bad_id": entry.id, "events_checked": checked,
+                    "verified_at": datetime.now(timezone.utc)}
         prev = entry.hash
-    return {"ok": True, "first_bad_id": None}
+    return {"ok": True, "first_bad_id": None, "events_checked": checked,
+            "verified_at": datetime.now(timezone.utc)}
