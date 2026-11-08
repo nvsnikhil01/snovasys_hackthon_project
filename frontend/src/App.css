@@ -1211,7 +1211,7 @@
 .grant-user b { color:var(--text) }
 .revoke-button { color:#d9939b }
 .access-empty { color:var(--muted) }
-.activity-history { overflow:hidden }
+.activity-history { width:100%; max-width:none; margin:0; padding:0; overflow:hidden }
 .activity-history>.section-heading { display:flex; align-items:center; justify-content:space-between; gap:16px }
 .activity-filters {
   display:grid;
@@ -1237,6 +1237,7 @@
   .app-shell.workspace-layout { grid-template-columns:220px minmax(0,1fr) }
   .sidebar { padding-right:12px; padding-left:12px }
   .workspace-content .main-content { width:calc(100% - 48px) }
+  .activity-filters { grid-template-columns:repeat(2,minmax(0,1fr)) }
 }
 @media(max-width:760px) {
   .app-shell.workspace-layout { display:flex; flex-direction:column }
