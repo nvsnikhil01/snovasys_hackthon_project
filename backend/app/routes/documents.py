@@ -1,6 +1,7 @@
 import os
 import re
 import uuid
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
@@ -16,9 +17,29 @@ from app.permissions import VALID_GRANT_LEVELS, authorize, can
 from app.schemas import DocumentOut, ShareOut, ShareRequest
 
 router = APIRouter(prefix="/documents", tags=["documents"])
+logger = logging.getLogger(__name__)
 
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "uploads"))
 MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+
+
+def _remove_local_file(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        logger.exception("Could not remove document file %s", path)
+
+
+def _restore_local_file(path: Path, data: bytes) -> None:
+    """Restore a missing file atomically, without leaving a partial destination."""
+    temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path.write_bytes(data)
+        os.replace(temp_path, path)
+    except OSError as exc:
+        _remove_local_file(temp_path)
+        raise HTTPException(status_code=500, detail="Could not restore document file") from exc
 
 # Allowed extension -> the first bytes a real file of that type starts with
 SIGNATURES = {
@@ -70,9 +91,14 @@ def upload(
 ):
     filename, data = validate_and_read_file(file)
 
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     stored_name = uuid.uuid4().hex + ".bin"
-    (UPLOAD_DIR / stored_name).write_bytes(data)
+    local_path = UPLOAD_DIR / stored_name
+    try:
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        local_path.write_bytes(data)
+    except OSError as exc:
+        _remove_local_file(local_path)
+        raise HTTPException(status_code=500, detail="Could not store uploaded file") from exc
 
     document = Document(
         owner_id=current_user.id,
@@ -83,10 +109,16 @@ def upload(
         content=data,
     )
     db.add(document)
-    db.commit()
+    try:
+        # log_event commits the pending document and audit row together.
+        db.flush()
+        log_event(db, current_user.id, "upload", document.id, "allowed")
+    except Exception as exc:
+        db.rollback()
+        _remove_local_file(local_path)
+        logger.exception("Could not commit uploaded document")
+        raise HTTPException(status_code=500, detail="Could not save uploaded document") from exc
     db.refresh(document)
-
-    log_event(db, current_user.id, "upload", document.id, "allowed")
     return document
 
 
@@ -182,9 +214,10 @@ def download_document(
     if not file_path.is_relative_to(upload_root):
         raise HTTPException(status_code=404, detail="Stored file is missing")
 
-    if not file_path.is_file() and document.file_data is not None:
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_bytes(document.file_data)
+    if not file_path.is_file():
+        stored_data = document.file_data if document.file_data is not None else document.content
+        if stored_data is not None:
+            _restore_local_file(file_path, stored_data)
 
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail="Stored file is missing")
@@ -211,8 +244,7 @@ def delete_document(
     db.delete(document)
     db.commit()
 
-    if file_path.is_file():
-        file_path.unlink()
+    _remove_local_file(file_path)
 
     log_event(db, current_user.id, "delete", document.id, "allowed")
 

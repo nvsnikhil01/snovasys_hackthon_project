@@ -1,13 +1,14 @@
 import io
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401 - registers all tables (users, documents, permissions, audit_log)
 from app.database import Base, get_db
 from app.main import app
+from app.models import AuditLog, Document, Permission
 
 
 @pytest.fixture
@@ -32,6 +33,152 @@ def client(monkeypatch, tmp_path):
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
+
+
+def _authenticated_user(client, email="owner@example.com"):
+    client.post("/auth/register", json={"email": email, "password": "password123"})
+    token = client.post(
+        "/auth/login", json={"email": email, "password": "password123"}
+    ).json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _test_db_session():
+    return next(app.dependency_overrides[get_db]())
+
+
+def test_upload_persists_database_and_local_bytes_and_downloads(client, tmp_path):
+    headers = _authenticated_user(client)
+    payload = b"downloadable contents"
+    uploaded = client.post(
+        "/documents", files={"file": ("report.txt", payload, "text/plain")}, headers=headers
+    )
+    assert uploaded.status_code == 201
+    document_id = uploaded.json()["id"]
+
+    db = _test_db_session()
+    try:
+        document = db.get(Document, document_id)
+        assert document.file_data == payload
+        assert document.content == payload
+        local_path = tmp_path / document.stored_path
+        assert local_path.read_bytes() == payload
+    finally:
+        db.close()
+
+    downloaded = client.get(f"/documents/{document_id}/download", headers=headers)
+    assert downloaded.status_code == 200
+    assert downloaded.content == payload
+
+
+def test_download_recovers_missing_local_file_from_database_bytes(client, tmp_path):
+    headers = _authenticated_user(client)
+    payload = b"recover from database"
+    uploaded = client.post(
+        "/documents", files={"file": ("recover.txt", payload, "text/plain")}, headers=headers
+    )
+    document_id = uploaded.json()["id"]
+    db = _test_db_session()
+    try:
+        local_path = tmp_path / db.get(Document, document_id).stored_path
+        local_path.unlink()
+    finally:
+        db.close()
+
+    downloaded = client.get(f"/documents/{document_id}/download", headers=headers)
+    assert downloaded.status_code == 200
+    assert downloaded.content == payload
+    assert local_path.read_bytes() == payload
+
+
+def test_download_recovers_legacy_content_column(client, tmp_path):
+    headers = _authenticated_user(client)
+    uploaded = client.post(
+        "/documents", files={"file": ("legacy.txt", b"original", "text/plain")}, headers=headers
+    )
+    document_id = uploaded.json()["id"]
+    db = _test_db_session()
+    try:
+        document = db.get(Document, document_id)
+        local_path = tmp_path / document.stored_path
+        local_path.unlink()
+        document.file_data = None
+        document.content = b"legacy content bytes"
+        db.commit()
+    finally:
+        db.close()
+
+    downloaded = client.get(f"/documents/{document_id}/download", headers=headers)
+    assert downloaded.status_code == 200
+    assert downloaded.content == b"legacy content bytes"
+
+
+def test_download_returns_not_found_when_local_and_database_copies_missing(client, tmp_path):
+    headers = _authenticated_user(client)
+    uploaded = client.post(
+        "/documents", files={"file": ("gone.txt", b"gone", "text/plain")}, headers=headers
+    )
+    document_id = uploaded.json()["id"]
+    db = _test_db_session()
+    try:
+        document = db.get(Document, document_id)
+        (tmp_path / document.stored_path).unlink()
+        document.file_data = None
+        document.content = None
+        db.commit()
+    finally:
+        db.close()
+
+    missing = client.get(f"/documents/{document_id}/download", headers=headers)
+    assert missing.status_code == 404
+
+
+def test_delete_removes_database_record_permissions_and_local_file(client, tmp_path):
+    headers = _authenticated_user(client)
+    _authenticated_user(client, "recipient@example.com")
+    uploaded = client.post(
+        "/documents", files={"file": ("delete.txt", b"delete me", "text/plain")}, headers=headers
+    )
+    document_id = uploaded.json()["id"]
+    client.post(
+        f"/documents/{document_id}/share",
+        json={"user_email": "recipient@example.com", "level": "read"},
+        headers=headers,
+    )
+    db = _test_db_session()
+    try:
+        local_path = tmp_path / db.get(Document, document_id).stored_path
+    finally:
+        db.close()
+
+    assert client.delete(f"/documents/{document_id}", headers=headers).status_code == 204
+    assert not local_path.exists()
+    db = _test_db_session()
+    try:
+        assert db.get(Document, document_id) is None
+        assert db.scalar(select(Permission).where(Permission.document_id == document_id)) is None
+    finally:
+        db.close()
+
+
+def test_failed_upload_commit_rolls_back_database_and_cleans_file(client, tmp_path, monkeypatch):
+    headers = _authenticated_user(client)
+
+    def fail_commit(_self):
+        raise RuntimeError("simulated database commit failure")
+
+    monkeypatch.setattr(Session, "commit", fail_commit)
+    failed = client.post(
+        "/documents", files={"file": ("failure.txt", b"never persist", "text/plain")}, headers=headers
+    )
+    assert failed.status_code == 500
+    assert list(tmp_path.iterdir()) == []
+    db = _test_db_session()
+    try:
+        assert db.scalars(select(Document)).all() == []
+        assert db.scalars(select(AuditLog).where(AuditLog.action == "upload")).all() == []
+    finally:
+        db.close()
 
 
 def test_sharing_lifecycle(client):
