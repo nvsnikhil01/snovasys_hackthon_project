@@ -61,6 +61,7 @@ ADMIN_ENDPOINTS = (
     "/admin/audit",
     "/admin/audit/verify",
     "/admin/documents",
+    "/admin/activity",
 )
 
 
@@ -71,9 +72,24 @@ def test_admin_endpoints_require_authentication(client, endpoint):
 
 def test_normal_user_can_list_users_but_not_admin_routes(client):
     headers = create_account(client, "user@example.com")
+    user_id = client.get("/auth/me", headers=headers).json()["id"]
+    create_account(client, "another-user@example.com")
 
-    assert client.get("/admin/users", headers=headers).status_code == 200
-    for endpoint in ("/admin/audit", "/admin/audit/verify", "/admin/documents"):
+    registered_users = client.get("/admin/users", headers=headers)
+    assert registered_users.status_code == 200
+    assert registered_users.json()
+    assert all("password_hash" not in account for account in registered_users.json())
+    assert client.get("/auth/activity", headers=headers).status_code == 200
+    assert {
+        event["user_id"] for event in client.get("/auth/activity", headers=headers).json()
+    } == {user_id}
+
+    for endpoint in (
+        "/admin/audit",
+        "/admin/audit/verify",
+        "/admin/documents",
+        "/admin/activity",
+    ):
         assert client.get(endpoint, headers=headers).status_code == 403
 
 
@@ -87,6 +103,8 @@ def test_admin_can_access_all_admin_endpoints(client):
 def test_auditor_can_access_audit_but_not_all_documents(client):
     headers = create_account(client, "auditor@example.com", role="auditor")
 
+    assert client.get("/admin/users", headers=headers).status_code == 200
     assert client.get("/admin/audit", headers=headers).status_code == 200
     assert client.get("/admin/audit/verify", headers=headers).status_code == 200
+    assert client.get("/admin/activity", headers=headers).status_code == 200
     assert client.get("/admin/documents", headers=headers).status_code == 403
