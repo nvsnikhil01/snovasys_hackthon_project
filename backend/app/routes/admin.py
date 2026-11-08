@@ -36,7 +36,7 @@ def audit_entries(
     result: str | None = Query(None, pattern="^(allowed|denied)$"),
     search: str | None = Query(None, max_length=255),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_role("admin", "auditor")),
 ):
     filters = []
     if action:
@@ -47,7 +47,7 @@ def audit_entries(
         term = f"%{search.strip()}%"
         filters.append(or_(User.email.ilike(term), Document.filename.ilike(term)))
 
-    joined = select(AuditLog).outerjoin(User, User.id == AuditLog.user_id).outerjoin(
+    joined = select(AuditLog, User, Document).outerjoin(User, User.id == AuditLog.user_id).outerjoin(
         Document, Document.id == AuditLog.document_id
     )
     count_query = select(func.count(AuditLog.id)).outerjoin(
@@ -90,6 +90,6 @@ def audit_entries(
 @router.get("/audit/verify")
 def audit_verify(
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_role("admin", "auditor")),
 ):
     return verify_chain(db)

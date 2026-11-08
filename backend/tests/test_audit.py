@@ -36,7 +36,11 @@ def test_edited_row_is_detected(db):
     add_three(db)
     db.get(AuditLog, 2).result = "allowed"  # simulate tamper: flip denied to allowed
     db.commit()
-    assert verify_chain(db) == {"ok": False, "first_bad_id": 2}
+    result = verify_chain(db)
+    assert result["ok"] is False
+    assert result["first_bad_id"] == 2
+    assert result["events_checked"] == 2
+    assert result["verified_at"] is not None
 
 
 def test_deleted_row_is_detected(db):
