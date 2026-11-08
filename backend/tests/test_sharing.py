@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401 - registers all tables (users, documents, permissions, audit_log)
+from app.audit import verify_chain
 from app.database import Base, get_db
 from app.main import app
 from app.models import AuditLog, Document, Permission
@@ -45,6 +46,38 @@ def _authenticated_user(client, email="owner@example.com"):
 
 def _test_db_session():
     return next(app.dependency_overrides[get_db]())
+
+
+def _create_document(client, owner_email="owner@example.com"):
+    headers = _authenticated_user(client, owner_email)
+    owner_id = client.get("/auth/me", headers=headers).json()["id"]
+    uploaded = client.post(
+        "/documents", files={"file": ("audit.txt", b"audit test", "text/plain")}, headers=headers
+    )
+    assert uploaded.status_code == 201
+    return headers, owner_id, uploaded.json()["id"]
+
+
+def _document_audit_snapshot(document_id):
+    db = _test_db_session()
+    try:
+        events = db.scalars(
+            select(AuditLog)
+            .where(AuditLog.document_id == document_id)
+            .order_by(AuditLog.id)
+        ).all()
+        snapshot = [
+            (event.user_id, event.document_id, event.action, event.result)
+            for event in events
+        ]
+        return snapshot, verify_chain(db)
+    finally:
+        db.close()
+
+
+def _assert_one_allowed_event(events, action, actor_id, document_id):
+    matching = [event for event in events if event[2] == action and event[3] == "allowed"]
+    assert matching == [(actor_id, document_id, action, "allowed")]
 
 
 def test_upload_persists_database_and_local_bytes_and_downloads(client, tmp_path):
@@ -159,6 +192,209 @@ def test_delete_removes_database_record_permissions_and_local_file(client, tmp_p
         assert db.scalar(select(Permission).where(Permission.document_id == document_id)) is None
     finally:
         db.close()
+
+
+def test_successful_delete_creates_exactly_one_specific_audit_event(client, tmp_path):
+    headers, actor_id, document_id = _create_document(client)
+    db = _test_db_session()
+    try:
+        stored_path = db.get(Document, document_id).stored_path
+    finally:
+        db.close()
+
+    response = client.delete(f"/documents/{document_id}", headers=headers)
+    assert response.status_code == 204
+    assert not (tmp_path / stored_path).exists()
+    events, chain = _document_audit_snapshot(document_id)
+    _assert_one_allowed_event(events, "delete", actor_id, document_id)
+    assert not [event for event in events if event[2] == "share" and event[3] == "allowed"]
+    assert chain["ok"] is True
+
+
+def test_failed_delete_commit_rolls_back_document_and_success_event(client, monkeypatch, tmp_path):
+    headers, _, document_id = _create_document(client)
+    db = _test_db_session()
+    try:
+        stored_path = db.get(Document, document_id).stored_path
+    finally:
+        db.close()
+
+    def fail_commit(_session):
+        raise RuntimeError("simulated delete commit failure")
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(Session, "commit", fail_commit)
+        with pytest.raises(RuntimeError, match="simulated delete commit failure"):
+            client.delete(f"/documents/{document_id}", headers=headers)
+
+    db = _test_db_session()
+    try:
+        assert db.get(Document, document_id) is not None
+    finally:
+        db.close()
+    assert (tmp_path / stored_path).is_file()
+    events, chain = _document_audit_snapshot(document_id)
+    assert not [event for event in events if event[2] == "delete" and event[3] == "allowed"]
+    assert chain["ok"] is True
+
+
+def test_denied_delete_still_records_denial_without_success(client):
+    owner_headers, _, document_id = _create_document(client)
+    stranger_headers = _authenticated_user(client, "stranger@example.com")
+
+    response = client.delete(f"/documents/{document_id}", headers=stranger_headers)
+    assert response.status_code == 404
+    events, chain = _document_audit_snapshot(document_id)
+    assert not [event for event in events if event[2] == "delete" and event[3] == "allowed"]
+    denied = [event for event in events if event[2] == "delete" and event[3] == "denied"]
+    assert denied == [(client.get("/auth/me", headers=stranger_headers).json()["id"], document_id, "delete", "denied")]
+    assert chain["ok"] is True
+    assert client.get(f"/documents/{document_id}", headers=owner_headers).status_code == 200
+
+
+def test_denied_grant_and_revoke_still_record_share_denials(client):
+    owner_headers, _, document_id = _create_document(client)
+    recipient_headers = _authenticated_user(client, "recipient@example.com")
+    stranger_headers = _authenticated_user(client, "stranger@example.com")
+    recipient_id = client.get("/auth/me", headers=recipient_headers).json()["id"]
+
+    denied_grant = client.post(
+        f"/documents/{document_id}/share",
+        json={"user_email": "recipient@example.com", "level": "read"},
+        headers=stranger_headers,
+    )
+    denied_revoke = client.delete(
+        f"/documents/{document_id}/share/{recipient_id}", headers=stranger_headers
+    )
+    assert denied_grant.status_code == 404
+    assert denied_revoke.status_code == 404
+
+    stranger_id = client.get("/auth/me", headers=stranger_headers).json()["id"]
+    events, chain = _document_audit_snapshot(document_id)
+    denied_share_events = [
+        event for event in events
+        if event == (stranger_id, document_id, "share", "denied")
+    ]
+    assert len(denied_share_events) == 2
+    assert not [event for event in events if event[0] == stranger_id and event[3] == "allowed"]
+    assert chain["ok"] is True
+    assert client.get(f"/documents/{document_id}", headers=owner_headers).status_code == 200
+
+
+def test_successful_grant_creates_one_specific_event_and_valid_chain(client):
+    headers, actor_id, document_id = _create_document(client)
+    _authenticated_user(client, "recipient@example.com")
+
+    response = client.post(
+        f"/documents/{document_id}/share",
+        json={"user_email": "recipient@example.com", "level": "read"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    events, chain = _document_audit_snapshot(document_id)
+    _assert_one_allowed_event(events, "grant_access", actor_id, document_id)
+    assert not [event for event in events if event[2] == "share" and event[3] == "allowed"]
+    assert chain["ok"] is True
+
+
+def test_failed_grant_validation_creates_no_success_event(client):
+    headers, _, document_id = _create_document(client)
+
+    response = client.post(
+        f"/documents/{document_id}/share",
+        json={"user_email": "missing@example.com", "level": "read"},
+        headers=headers,
+    )
+    assert response.status_code == 404
+    events, chain = _document_audit_snapshot(document_id)
+    assert not [event for event in events if event[2] in {"share", "grant_access"} and event[3] == "allowed"]
+    assert chain["ok"] is True
+    db = _test_db_session()
+    try:
+        assert db.scalar(select(Permission).where(Permission.document_id == document_id)) is None
+    finally:
+        db.close()
+
+
+def test_failed_grant_commit_rolls_back_permission_and_event(client, monkeypatch):
+    headers, _, document_id = _create_document(client)
+    _authenticated_user(client, "recipient@example.com")
+
+    def fail_commit(_session):
+        raise RuntimeError("simulated grant commit failure")
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(Session, "commit", fail_commit)
+        with pytest.raises(RuntimeError, match="simulated grant commit failure"):
+            client.post(
+                f"/documents/{document_id}/share",
+                json={"user_email": "recipient@example.com", "level": "read"},
+                headers=headers,
+            )
+
+    db = _test_db_session()
+    try:
+        assert db.scalar(select(Permission).where(Permission.document_id == document_id)) is None
+    finally:
+        db.close()
+    events, chain = _document_audit_snapshot(document_id)
+    assert not [event for event in events if event[2] in {"share", "grant_access"} and event[3] == "allowed"]
+    assert chain["ok"] is True
+
+
+def test_successful_revoke_creates_one_specific_event_and_valid_chain(client):
+    headers, actor_id, document_id = _create_document(client)
+    recipient_headers = _authenticated_user(client, "recipient@example.com")
+    recipient_id = client.get("/auth/me", headers=recipient_headers).json()["id"]
+    assert client.post(
+        f"/documents/{document_id}/share",
+        json={"user_email": "recipient@example.com", "level": "read"},
+        headers=headers,
+    ).status_code == 200
+
+    response = client.delete(
+        f"/documents/{document_id}/share/{recipient_id}", headers=headers
+    )
+    assert response.status_code == 204
+    events, chain = _document_audit_snapshot(document_id)
+    _assert_one_allowed_event(events, "revoke_access", actor_id, document_id)
+    assert not [event for event in events if event[2] == "share" and event[3] == "allowed"]
+    assert chain["ok"] is True
+    assert client.get(f"/documents/{document_id}", headers=recipient_headers).status_code == 404
+
+
+def test_failed_revoke_commit_rolls_back_permission_and_event(client, monkeypatch):
+    headers, _, document_id = _create_document(client)
+    recipient_headers = _authenticated_user(client, "recipient@example.com")
+    recipient_id = client.get("/auth/me", headers=recipient_headers).json()["id"]
+    assert client.post(
+        f"/documents/{document_id}/share",
+        json={"user_email": "recipient@example.com", "level": "read"},
+        headers=headers,
+    ).status_code == 200
+
+    def fail_commit(_session):
+        raise RuntimeError("simulated revoke commit failure")
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(Session, "commit", fail_commit)
+        with pytest.raises(RuntimeError, match="simulated revoke commit failure"):
+            client.delete(f"/documents/{document_id}/share/{recipient_id}", headers=headers)
+
+    db = _test_db_session()
+    try:
+        assert db.scalar(
+            select(Permission).where(
+                Permission.document_id == document_id,
+                Permission.user_id == recipient_id,
+            )
+        ) is not None
+    finally:
+        db.close()
+    events, chain = _document_audit_snapshot(document_id)
+    assert not [event for event in events if event[2] == "revoke_access" and event[3] == "allowed"]
+    assert not [event for event in events if event[2] == "share" and event[3] == "allowed"]
+    assert chain["ok"] is True
 
 
 def test_failed_upload_commit_rolls_back_database_and_cleans_file(client, tmp_path, monkeypatch):

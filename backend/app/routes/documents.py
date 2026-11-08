@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.audit import log_event
+from app.audit import audit_transaction, log_event
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import Document, Permission, User
@@ -233,20 +233,20 @@ def delete_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    document = authorize(db, current_user, db.get(Document, doc_id), "delete")
+    document = authorize(
+        db, current_user, db.get(Document, doc_id), "delete", log_allowed=False
+    )
 
     file_path = (UPLOAD_DIR / document.stored_path).resolve()
     upload_root = UPLOAD_DIR.resolve()
     if not file_path.is_relative_to(upload_root):
         raise HTTPException(status_code=400, detail="Invalid stored path")
 
-    db.execute(delete(Permission).where(Permission.document_id == document.id))
-    db.delete(document)
-    db.commit()
+    with audit_transaction(db, current_user.id, "delete", document.id, "allowed"):
+        db.execute(delete(Permission).where(Permission.document_id == document.id))
+        db.delete(document)
 
     _remove_local_file(file_path)
-
-    log_event(db, current_user.id, "delete", document.id, "allowed")
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -258,7 +258,9 @@ def share_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    document = authorize(db, current_user, db.get(Document, doc_id), "share")
+    document = authorize(
+        db, current_user, db.get(Document, doc_id), "share", log_allowed=False
+    )
 
     if payload.level not in VALID_GRANT_LEVELS:
         raise HTTPException(status_code=400, detail="Invalid permission level. Use 'read' or 'edit'")
@@ -271,26 +273,23 @@ def share_document(
     if target_user.id == document.owner_id:
         raise HTTPException(status_code=400, detail="Cannot share a document with its owner")
 
-    grant = db.scalar(
-        select(Permission).where(
-            Permission.document_id == document.id,
-            Permission.user_id == target_user.id,
+    with audit_transaction(db, current_user.id, "grant_access", document.id, "allowed"):
+        grant = db.scalar(
+            select(Permission).where(
+                Permission.document_id == document.id,
+                Permission.user_id == target_user.id,
+            )
         )
-    )
-
-    if grant:
-        grant.level = payload.level
-    else:
-        grant = Permission(
-            document_id=document.id,
-            user_id=target_user.id,
-            level=payload.level,
-        )
-        db.add(grant)
-
-    db.commit()
+        if grant:
+            grant.level = payload.level
+        else:
+            grant = Permission(
+                document_id=document.id,
+                user_id=target_user.id,
+                level=payload.level,
+            )
+            db.add(grant)
     db.refresh(grant)
-    log_event(db, current_user.id, "grant_access", document.id, "allowed")
 
     return ShareOut(
         id=grant.id,
@@ -336,7 +335,9 @@ def revoke_document_share(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    document = authorize(db, current_user, db.get(Document, doc_id), "share")
+    document = authorize(
+        db, current_user, db.get(Document, doc_id), "share", log_allowed=False
+    )
 
     grant = db.scalar(
         select(Permission).where(
@@ -347,7 +348,6 @@ def revoke_document_share(
     if not grant:
         raise HTTPException(status_code=404, detail="Share grant not found")
 
-    db.delete(grant)
-    db.commit()
-    log_event(db, current_user.id, "revoke_access", document.id, "allowed")
+    with audit_transaction(db, current_user.id, "revoke_access", document.id, "allowed"):
+        db.delete(grant)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

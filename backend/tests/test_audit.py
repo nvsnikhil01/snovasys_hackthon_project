@@ -1,10 +1,10 @@
 import pytest
 from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from app import models  # noqa: F401
-from app.audit import log_event, verify_chain
+from app.audit import audit_transaction, log_event, verify_chain
 from app.database import Base
 from app.models import AuditLog
 
@@ -48,6 +48,26 @@ def test_deleted_row_is_detected(db):
     db.delete(db.get(AuditLog, 2))
     db.commit()
     assert verify_chain(db)["ok"] is False
+
+
+def test_audit_transaction_preserves_commit_error_when_rollback_fails(db, monkeypatch, caplog):
+    def fail_commit(_session):
+        raise RuntimeError("simulated commit failure")
+
+    def fail_rollback(_session):
+        raise RuntimeError("simulated rollback failure")
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(Session, "commit", fail_commit)
+        patcher.setattr(Session, "rollback", fail_rollback)
+        with pytest.raises(RuntimeError, match="simulated commit failure"):
+            with audit_transaction(db, 7, "delete", 12, "allowed"):
+                pass
+
+    assert "Could not roll back failed audit transaction" in caplog.text
+    db.rollback()
+    assert db.query(AuditLog).count() == 0
+    assert verify_chain(db)["ok"] is True
 
 
 def test_concurrent_writers_keep_the_chain_valid():
