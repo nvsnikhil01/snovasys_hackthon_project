@@ -89,6 +89,22 @@ I use AI tools and record every use here, including where they were wrong.
 - Used it for: drafting the UI refactoring prompt for Codex and generating updated documentation entries for `DAILY_LOG.md` and `README.md`.
 - What I did myself: reviewed screen mockups, selected color palette tokens, and updated documentation files manually.
 
+## 7 Nov 2026
+
+- Tools: Codex, Gemini and ChatGPT.
+- Used them for: implementing the redesigned TrustVault frontend, authentication and JWT hardening, audit event improvements, permission validation, document persistence and recovery, Activity History, and expanded authorization tests.
+- What I did myself: reviewed the proposed changes, ran the backend and frontend tests, checked Git diffs, committed and pushed the implementation, and verified deployment progress.
+- What I kept: the centralized permission model, role-aware Activity History, database-backed document recovery, responsive interface improvements and additional automated tests.
+- What I changed or rejected: kept the existing architecture stable rather than introducing unnecessary infrastructure changes close to the deadline. Multi-process audit coordination and independent audit-chain checkpoints remained open security improvements.
+
+## 8 Nov 2026
+
+- Tools: Codex and ChatGPT.
+- Used them for: safe production role provisioning, admin and auditor authorization improvements, document persistence and recovery, and atomic document mutation audit logging.
+- What I did myself: reviewed the implementation, ran the backend and frontend tests, checked Git diffs, verified the production environment configuration, committed and pushed the changes, and checked the Render deployment status.
+- What I kept: explicit role-provisioning safeguards, server-side role authorization, database-backed file recovery, and audit events committed in the same transaction as document mutations.
+- What I changed or rejected: avoided introducing a new multi-process audit coordination mechanism close to the deadline. The process-local lock and lack of an independent audit-chain checkpoint remain documented limitations.
+
 ## Mistakes the AI made
 - 1 Nov: Claude gave me Command Prompt commands (rmdir /s /q) while I was in PowerShell, so they failed. I used the PowerShell equivalent.
 - 1 Nov: Claude told me to pick "Installer" on nodejs.org, but the page no longer offers that option. I used winget instead.
@@ -96,3 +112,10 @@ I use AI tools and record every use here, including where they were wrong.
 - 3 Nov: Claude's test for the production SECRET_KEY check printed nothing because my terminal still had a local SECRET_KEY set. I cleared it and the test showed the expected error.
 - 4 Nov: Claude gave me `cd C:\Users\nnikh\testfiles` while my terminal was on the `D:` drive without the `/d` flag, so the 4 test files were created inside my repo root. I deleted them and used `cd /d` so they were never committed.
 - 4 Nov: When pasting terminal commands, `pip freeze > requirements.txt` merged with the next command and created an untracked `requirements.txtpip` file, which I deleted before committing.
+- 5 Nov: During the document-route review, the initial AI guidance did not identify all the risks involving database-stored file paths and information leakage between inaccessible and nonexistent document IDs. A later security review identified these issues, and I added directory-boundary validation and recorded the remaining risks in THREATS.md.
+- 6 Nov: The AI's comparison with the early sample_V1 prototype risked treating prototype features as if they were already implemented in the actual project. I kept only the useful UI recommendations and verified the existing implementation before accepting changes. Database-backed session revocation was postponed to avoid destabilizing the working JWT architecture before the deadline.
+- 7 Nov: ChatGPT suggested moving to a later development task before the previous task was fully completed and verified. I corrected the task order and insisted on completing, testing and reviewing each task before proceeding.
+- 8 Nov: ChatGPT initially suggested a development schedule that did not sufficiently account for the remaining implementation and verification work. I clarified that unfinished tasks had to be completed, tested and reviewed in sequence before moving to the next task.
+- 9 Nov: ChatGPT initially treated the Render Free instance and default Uvicorn command as sufficient evidence of a single running process. The Start Command confirmed one Uvicorn worker per instance, but the total instance count still needed separate verification. I checked the Render dashboard instead of assuming the instance count.
+
+- 9 Nov: ChatGPT initially suggested documentation updates before checking the exact GitHub files and commit history. I asked it to inspect the repository first so the documentation would reflect actual implementation and commit evidence.

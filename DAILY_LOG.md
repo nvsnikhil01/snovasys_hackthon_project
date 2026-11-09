@@ -125,3 +125,66 @@ One entry per day, written at the end of the day. Only what really happened.
 
 **Tomorrow**
 - Complete UI styling overhaul, wire up frontend sharing views to backend endpoints, and final submission prep
+
+---
+
+## Day 7: Sat 7 Nov
+
+**Done**
+- Completed the major frontend redesign using a consistent dark-themed TrustVault interface, responsive layouts, navigation, document tables and sharing dialogs.
+- Improved authentication and audit security: required JWT expiration and subject claims, added password-length protection, and expanded audit event coverage.
+- Improved permission filtering so only valid `read` and `edit` grants provide document access.
+- Added document persistence and recovery support using database-stored file bytes alongside local file storage.
+- Added Activity History functionality and improved document search and user-management interfaces.
+- Expanded backend authorization and document-route test coverage.
+- Added responsive layout improvements to Activity History.
+- Updated the project through multiple focused Git commits.
+
+**Not done / problems**
+- Multi-process audit-write coordination was not implemented; the existing threading lock is process-local.
+- Audit-chain deletion of the final records was not independently detectable.
+- The final documentation and README still needed synchronization with the implementation.
+
+**AI used today**
+- Codex: code implementation assistance, security reviews and test coverage improvements.
+- Gemini: planning and documentation assistance.
+- ChatGPT: project review, task planning and implementation guidance.
+- Details and specific contributions are recorded in PROMPTS.md.
+
+**Tomorrow**
+- Complete safe production role provisioning.
+- Expand admin and auditor authorization tests.
+- Harden document persistence and recovery.
+- Continue Activity History and security improvements.
+
+---
+
+## Day 8: Sun 8 Nov
+
+**Done**
+- Completed safe production role provisioning for existing accounts, with explicit role selection and safeguards against accidental admin demotion.
+- Expanded admin and auditor authorization coverage, including role-restricted routes and audit access.
+- Hardened document file persistence by storing file bytes in the database as a recovery source alongside local file storage.
+- Added document recovery behavior so downloads can restore missing local files from database-stored content.
+- Improved audit logging for document mutations so successful delete, share and revoke operations record their operation-specific audit events in the same database transaction.
+- Added tests for successful operations, denied attempts, transaction failures and audit-chain verification.
+- Reviewed the Render deployment configuration and confirmed that the Uvicorn start command does not explicitly configure multiple workers.
+- Confirmed that `AUDIT_KEY` and `APP_ENV` are configured in the Render environment.
+- Pushed the completed changes to GitHub and confirmed that the latest Render deployment was Live.
+
+**Not done / problems**
+- The audit-write threading lock is process-local; it does not coordinate multiple workers or service instances.
+- Deleting the latest audit records can still go undetected because an independent checkpoint mechanism has not been implemented.
+- The Render instance count was not conclusively verified from the available dashboard information.
+- Final documentation still needs to be synchronized with the implemented features and current security limitations.
+
+**AI used today**
+- Codex: implementation assistance, code review, security hardening and automated test improvements.
+- ChatGPT: task planning, implementation review, Render configuration analysis and documentation guidance.
+- Details and specific contributions are recorded in PROMPTS.md.
+
+**Tomorrow**
+- Review and update all submission documentation.
+- Recheck the implementation against the assessment requirements.
+- Review the remaining audit-chain and deployment limitations.
+- Complete final testing and submission preparation.
