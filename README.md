@@ -98,32 +98,38 @@ The project includes automated backend tests covering authentication, permission
 Current layout. More files are added as features are built.
 
 ```
-.
+TrustVault/
+│
 ├── backend/
-│   ├── seed.py
-│   ├── requirements.txt
-│   ├── uploads/
 │   ├── app/
-│   │   ├── main.py
-│   │   ├── database.py
-│   │   ├── models.py
-│   │   ├── schemas.py
-│   │   ├── security.py
-│   │   ├── dependencies.py
-│   │   ├── permissions.py
-│   │   ├── audit.py
-│   │   └── routes/
-│   └── tests/
+│   │   ├── routes/          # API endpoints
+│   │   ├── main.py          # FastAPI application
+│   │   ├── database.py      # Database configuration
+│   │   ├── models.py        # Database models
+│   │   ├── schemas.py       # Request/response schemas
+│   │   ├── security.py      # Authentication and security
+│   │   ├── permissions.py   # Document access control
+│   │   ├── audit.py         # Tamper-evident audit logging
+│   │   └── provision_role.py # Production role provisioning
+│   ├── tests/               # Backend tests
+│   ├── seed.py              # Initial database data
+│   └── requirements.txt     # Python dependencies
+│
 ├── frontend/
-│   ├── src/
+│   ├── src/                 # React application and UI
+│   ├── tests/               # Frontend tests
+│   ├── public/              # Static assets
 │   ├── package.json
 │   └── vite.config.js
+│
 ├── docs/
-│   └── PERMISSIONS.md
-├── DAILY_LOG.md
-├── PROMPTS.md
-├── THREATS.md
-└── README.md
+│   └── PERMISSIONS.md       # Permission model documentation
+│
+├── DAILY_LOG.md             # Daily development progress
+├── PROMPTS.md               # AI usage and prompts
+├── THREATS.md               # Security threats and mitigations
+├── README.md                # Project overview and setup
+└── .gitignore
 ```
 
 ---
