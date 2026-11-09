@@ -1,16 +1,15 @@
-# React + Vite
+# TrustVault frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+TrustVault's frontend is a React single-page application built with Vite. It includes the login and registration form, document workspace, sharing dialog, user directory, Activity History, and Security & Audit views.
 
-Currently, two official plugins are available:
+## Development
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+From this directory, install the dependencies and start the Vite development server with npm install followed by npm run dev.
 
-## React Compiler
+The API base URL can be set with VITE_API_URL. Without it, the app uses the configured TrustVault Render API URL in src/api.js. Do not put secrets in frontend environment variables; Vite embeds them in client-side assets.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Checks
 
-## Expanding the ESLint configuration
+Run npm test, npm run lint, and npm run build from this directory.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+The tests use Node's built-in test runner for the frontend utility modules. There is no browser DOM test framework configured, so React interaction and viewport behavior require browser testing.

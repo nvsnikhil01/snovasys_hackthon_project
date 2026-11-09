@@ -1,24 +1,91 @@
+import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, or_, select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.audit import verify_chain
+from app.audit import audit_transaction, verify_chain
 from app.database import get_db
-from app.dependencies import get_current_user, require_role
-from app.models import AuditLog, Document, User
+from app.dependencies import require_role
+from app.models import AuditLog, Document, Permission, User
 from app.schemas import DocumentOut, UserOut
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+def _event_details(event: AuditLog):
+    if event.details is None:
+        return None
+    try:
+        return json.loads(event.details)
+    except (TypeError, json.JSONDecodeError):
+        return {"unparsed": True}
+
+
 @router.get("/users", response_model=list[UserOut])
 def list_users(
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_role("admin", "auditor")),
 ):
     return db.scalars(select(User).order_by(User.id)).all()
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_role("admin")),
+):
+    """Remove an account while transferring owned documents and retaining audit history."""
+    target_holder = {}
+
+    def validate_and_capture_target():
+        # Run these checks after acquiring the audit writer lock. Row locks
+        # also serialize admin deletions across PostgreSQL workers.
+        admin_ids = db.scalars(
+            select(User.id).where(User.role == "admin").order_by(User.id).with_for_update()
+        ).all()
+        if admin.id not in admin_ids:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        target = db.scalar(select(User).where(User.id == user_id).with_for_update())
+        if target is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        if target.id == admin.id:
+            raise HTTPException(status_code=400, detail="You cannot delete your own account")
+        if target.role == "admin" and len(admin_ids) <= 1:
+            raise HTTPException(status_code=409, detail="Cannot delete the last active admin")
+        target_holder["target"] = target
+        return {"deleted_user_id": target.id, "deleted_user_email": target.email}
+
+    try:
+        with audit_transaction(
+            db,
+            admin.id,
+            "delete_user",
+            None,
+            "allowed",
+            details=validate_and_capture_target,
+        ):
+            target = target_holder["target"]
+            db.execute(
+                update(Document).where(Document.owner_id == target.id).values(owner_id=admin.id)
+            )
+            # Remove grants held by the deleted account. Grants on its documents
+            # remain valid after ownership is transferred to the deleting admin.
+            db.execute(delete(Permission).where(Permission.user_id == target.id))
+            db.delete(target)
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=409, detail="Account deletion could not be completed; no changes were saved"
+        ) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=500, detail="Account deletion could not be completed; no changes were saved"
+        ) from exc
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/documents", response_model=list[DocumentOut])
@@ -76,6 +143,7 @@ def audit_entries(
                 "result": event.result,
                 "prev_hash": event.prev_hash,
                 "hash": event.hash,
+                "details": _event_details(event),
             }
             for event, actor, document in rows
         ],
@@ -171,6 +239,7 @@ def activity_history(
                 "result": event.result,
                 "prev_hash": event.prev_hash,
                 "hash": event.hash,
+                "details": _event_details(event),
             }
             for event, actor, document in rows
         ],

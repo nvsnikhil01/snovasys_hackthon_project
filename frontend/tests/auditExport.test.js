@@ -47,6 +47,18 @@ test("TXT export includes metadata and chronologically separated records", () =>
   assert.match(report, /Document: memo \| <draft>\.txt \(ID 12\)/);
 });
 
+test("audit export preserves event details such as an account deletion target", () => {
+  const deletion = {
+    ...entries[0],
+    action: "delete_user",
+    details: { deleted_user_id: 42, deleted_user_email: "removed@example.test" },
+  };
+  const options = { filters, auditIntegrity: null, generatedAt: "2026-11-08T10:04:00Z" };
+  assert.match(buildAuditExport("txt", [deletion], options), /deleted_user_email/);
+  const markdown = buildAuditExport("md", [deletion], options);
+  assert.match(markdown, /removed@example/);
+});
+
 test("TXT filter metadata replaces newline and control characters with spaces", () => {
   const unsafeFilters = {
     action: "edit\nScope: injected",

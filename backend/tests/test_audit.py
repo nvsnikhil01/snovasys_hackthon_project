@@ -43,6 +43,20 @@ def test_edited_row_is_detected(db):
     assert result["verified_at"] is not None
 
 
+def test_event_details_are_authenticated_by_the_hash_chain(db):
+    with audit_transaction(
+        db, 9, "delete_user", None, "allowed",
+        details={"deleted_user_id": 12, "deleted_user_email": "removed@example.com"},
+    ) as event:
+        pass
+    event_id = event.id
+    assert verify_chain(db)["ok"] is True
+    db.get(AuditLog, event_id).details = '{"deleted_user_email":"changed@example.com","deleted_user_id":12}'
+    db.commit()
+    assert verify_chain(db)["ok"] is False
+    assert verify_chain(db)["first_bad_id"] == event_id
+
+
 def test_deleted_row_is_detected(db):
     add_three(db)
     db.delete(db.get(AuditLog, 2))

@@ -119,3 +119,11 @@ I use AI tools and record every use here, including where they were wrong.
 - 9 Nov: ChatGPT initially treated the Render Free instance and default Uvicorn command as sufficient evidence of a single running process. The Start Command confirmed one Uvicorn worker per instance, but the total instance count still needed separate verification. I checked the Render dashboard instead of assuming the instance count.
 
 - 9 Nov: ChatGPT initially suggested documentation updates before checking the exact GitHub files and commit history. I asked it to inspect the repository first so the documentation would reflect actual implementation and commit evidence.
+
+## 9 Nov 2026 — submission corrections
+
+- Tool: Codex.
+- Used it for: restricting the registered-user endpoint, implementing admin-only permanent user deletion with document ownership transfer and audit retention, adding authentication loading states, tightening responsive table/modal behavior, and synchronizing documentation.
+- Tests actually run: backend `python -m pytest -q` (84 passed); frontend `npm test` (17 passed); `npm run lint` (passed); `npm run build` (passed).
+- Browser viewport checks were not run because no browser or browser automation package was available in the workspace. Responsive behavior was reviewed in the CSS only.
+- No commit or push was made.

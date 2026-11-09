@@ -58,6 +58,12 @@ function documentLabel(event) {
   return "No document reference";
 }
 
+function detailsLabel(event) {
+  if (event.details === null || event.details === undefined) return "Not provided";
+  const details = typeof event.details === "object" ? JSON.stringify(event.details) : event.details;
+  return safeText(details);
+}
+
 function filterLabel(filters) {
   return [
     `action=${safeText(filters.action || "All")}`,
@@ -156,6 +162,7 @@ export function buildAuditExport(format, entries, { filters, auditIntegrity, gen
         `Action: ${safeText(event.action)}`,
         `Document: ${documentLabel(event)}`,
         `Outcome: ${safeText(event.result)}`,
+        `Details: ${detailsLabel(event)}`,
         "",
       );
     }
@@ -183,6 +190,7 @@ export function buildAuditExport(format, entries, { filters, auditIntegrity, gen
         `- **Action:** ${escapeMarkdown(event.action)}`,
         `- **Document:** ${escapeMarkdown(documentLabel(event))}`,
         `- **Outcome:** ${escapeMarkdown(event.result)}`,
+        `- **Details:** ${escapeMarkdown(detailsLabel(event))}`,
         "",
       );
     }

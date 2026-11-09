@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -147,6 +148,7 @@ def activity(
                 "result": event.result,
                 "prev_hash": event.prev_hash,
                 "hash": event.hash,
+                "details": json.loads(event.details) if event.details else None,
             }
             for event, actor, document in rows
         ],

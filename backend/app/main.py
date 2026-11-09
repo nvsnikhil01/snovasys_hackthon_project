@@ -21,6 +21,13 @@ if "documents" in inspect(engine).get_table_names():
         with engine.begin() as connection:
             connection.exec_driver_sql(f"ALTER TABLE documents ADD COLUMN file_data {binary_type}")
 
+# Add optional event context without rewriting existing audit records or hashes.
+if "audit_log" in inspect(engine).get_table_names():
+    audit_columns = {column["name"] for column in inspect(engine).get_columns("audit_log")}
+    if "details" not in audit_columns:
+        with engine.begin() as connection:
+            connection.exec_driver_sql("ALTER TABLE audit_log ADD COLUMN details TEXT")
+
 app = FastAPI(title="TrustVault API")
 
 # Allow frontend origins (comma-separated in FRONTEND_ORIGIN env var, or * in dev)

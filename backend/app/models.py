@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -51,5 +51,8 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String(50))
     document_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     result: Mapped[str] = mapped_column(String(10))  # allowed or denied
+    # Optional canonical JSON for event-specific context. Null preserves the
+    # original hash payload for existing audit rows.
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
     prev_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     hash: Mapped[str] = mapped_column(String(64))

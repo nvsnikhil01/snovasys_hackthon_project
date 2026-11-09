@@ -29,13 +29,13 @@
 ---
 
 ## 📖 About
-Trust Vault lets users upload files and decide exactly who can read or edit each one. The server checks permissions on every request, and every action, including refused attempts, is written to an audit log.
+Trust Vault lets users upload files and decide who can read or edit each one. The server checks document permissions on each request. Document authorization denials and login attempts are recorded; generic role-check denials are not currently written to the audit log.
 
 **Design principles**
 - Access is denied by default.
 - One central permission function makes every decision.
 - The browser is never trusted, so all checks run on the server.
-- Denied attempts are logged too, because failed access is what an investigator needs to see.
+- Document authorization denials and login attempts are logged for review.
 
 ---
 
@@ -48,10 +48,11 @@ Trust Vault lets users upload files and decide exactly who can read or edit each
 - [x] Per-document permissions: read, edit, share, and revoke
 - [x] Centralized server-side permission checks
 - [x] Tamper-evident HMAC-SHA256 audit logging
-- [x] Audit events for successful operations and denied attempts
+- [x] Audit events for successful document mutations, login attempts, and document authorization denials
 - [x] Permission-aware document access and search
 - [x] Personal and system-wide Activity History
 - [x] Admin and auditor views with role-based authorization
+- [x] Admin-only permanent user deletion with document ownership transfer
 - [x] Document persistence and recovery using database-stored file bytes
 - [x] Responsive React frontend
 - [x] Automated backend authorization, audit, and sharing tests
@@ -61,7 +62,7 @@ Trust Vault lets users upload files and decide exactly who can read or edit each
 
 ## ✅ Current Status
 
-Implemented and deployed:
+Implemented functionality:
 
 - Frontend: https://trustvault-f58w.onrender.com
 - Backend: https://snovasys-hackthon-project.onrender.com
@@ -76,11 +77,11 @@ Implemented functionality:
 - Centralized document authorization using `can()`.
 - HMAC-SHA256 tamper-evident audit logging and audit verification.
 - Personal and system-wide Activity History with filtering and export functionality.
-- Admin and auditor authorization and management views.
+- Admin and auditor views; admins can permanently delete accounts, auditors have read-only directory access, and role changes use `backend/app/provision_role.py`.
 - Database-backed document persistence and recovery.
 - Atomic database transactions for document mutations and their corresponding success audit events.
 
-The project includes automated backend tests covering authentication, permissions, document operations, audit logging, and authorization.
+The project includes automated backend tests covering authentication, permissions, document operations, audit logging, and authorization. Deployment settings are managed outside this repository; the URLs above are configured in the frontend and were previously used for Render deployment. Current service availability is not verified by the source checkout.
 
 ---
 
@@ -161,16 +162,16 @@ npm install
 npm run dev
 ```
 
-**Demo accounts** (created by `seed.py`, for demonstration only)
+The seed script creates demo accounts in the configured database. Run `backend/seed.py` only against a disposable local database; never run it against production.
 
-| Email | Password | Role |
-|---|---|---|
-| admin@example.com | admin-demo-123 | admin |
-| auditor@example.com | auditor-demo-123 | auditor |
-| alice@example.com | password123 | user |
-| bob@example.com | password123 | user |
+| Email | Role |
+|---|---|
+| admin@example.com | admin |
+| auditor@example.com | auditor |
+| alice@example.com | user |
+| bob@example.com | user |
 
-I will re-test these steps on a fresh clone before submitting.
+Use only disposable local data when running the seed script.
 
 ---
 
@@ -187,6 +188,7 @@ Implemented:
 - Resolved file paths are checked against the upload directory.
 - Audit events use an HMAC-SHA256 hash chain.
 - Successful document mutations and their corresponding audit events are committed in the same database transaction.
+- Account deletion transfers owned documents, removes grants held by the deleted account, and records the target account ID and email in the authenticated audit chain.
 - Personal and administrative Activity History access is restricted by role.
 
 See [THREATS.md](THREATS.md) for verified findings, mitigations, and remaining limitations.
@@ -222,5 +224,6 @@ The tools used, their contributions, and mistakes identified during development 
 - File storage quotas and automated retention/cleanup policies are not implemented.
 - Physical file cleanup is separate from the database transaction.
 - The application has not undergone an independent production security audit.
+- User deletion is permanent; account recovery is not available. Owned documents are retained and transferred to the deleting admin.
 
 See [THREATS.md](THREATS.md) for details.

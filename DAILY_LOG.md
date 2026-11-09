@@ -188,3 +188,22 @@ One entry per day, written at the end of the day. Only what really happened.
 - Recheck the implementation against the assessment requirements.
 - Review the remaining audit-chain and deployment limitations.
 - Complete final testing and submission preparation.
+
+## Day 9: Mon 9 Nov
+
+**Done**
+- Restricted the registered-user directory to admins and auditors; regular users receive 403.
+- Added admin-only permanent account deletion with self-deletion prevention, ownership transfer, grant cleanup, and audit history retention.
+- Added authenticated audit details for the deleted account ID and email while keeping existing audit-row hashes verifiable.
+- Added login and registration loading feedback, duplicate-submit protection, disabled controls, and accessible status markup.
+- Added responsive table containment, modal viewport sizing, and narrow-screen layout adjustments.
+- Updated project documentation to match the implemented permissions and deletion behavior; removed demo password values from README instructions.
+- Verification: backend `python -m pytest -q` passed (84 tests); frontend `npm test` passed (17 tests); `npm run lint` passed; `npm run build` passed.
+
+**Not verified**
+- Browser-based viewport checks at 320, 375, 390, 768, 1024, and desktop widths; no browser automation or installed browser was available in the workspace.
+- Live Render settings and current deployment availability; those settings are outside the checked-out repository.
+
+**Known limitations**
+- The audit write lock is process-local, and the hash chain has no independent checkpoint to detect deletion of its latest records or the whole log.
+- Account deletion is permanent. Owned documents are transferred to the deleting admin; no account restoration workflow exists.
